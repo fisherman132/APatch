@@ -94,7 +94,8 @@ class PatchesViewModel : ViewModel() {
 
         // Extract scripts
         for (script in listOf(
-            "boot_patch.sh", "boot_unpatch.sh", "boot_extract.sh", "util_functions.sh", "kpimg"
+            "boot_patch.sh", "boot_unpatch.sh", "boot_extract.sh", "util_functions.sh", "kpimg",
+            "device_profile.kpm"
         )) {
             val dest = File(patchDir, script)
             apApp.assets.open(script).writeTo(dest)
@@ -392,19 +393,18 @@ class PatchesViewModel : ViewModel() {
                 patchCommand.addAll(listOf(superkey, srcBoot.path))
             }
 
-            for (i in 0..<newExtrasFileName.size) {
-                patchCommand.addAll(listOf("-M", newExtrasFileName[i]))
-                val extra = newExtras[i]
-                if (extra.args.isNotEmpty()) {
-                    patchCommand.addAll(listOf("-A", extra.args))
-                }
-                if (extra.event.isNotEmpty()) {
-                    patchCommand.addAll(listOf("-V", extra.event))
-                }
-                patchCommand.addAll(listOf("-T", extra.type.desc))
-            }
+            patchCommand.addAll(
+                listOf(
+                    "-M", "device_profile.kpm",
+                    "-V", KPModel.TriggerEvent.PRE_KERNEL_INIT.event,
+                    "-T", KPModel.ExtraType.KPM.desc
+                )
+            )
             for (i in 0..<existedExtras.size) {
                 val extra = existedExtras[i]
+                if (extra.type == KPModel.ExtraType.KPM && extra.name == "device-profile") {
+                    continue
+                }
                 patchCommand.addAll(listOf("-E", extra.name))
                 if (extra.args.isNotEmpty()) {
                     patchCommand.addAll(listOf("-A", extra.args))

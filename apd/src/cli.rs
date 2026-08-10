@@ -83,6 +83,13 @@ enum Commands {
 
     /// MagiskPolicy - SELinux Policy Patch Tool
     Sepolicy(crate::sepolicy::Args),
+
+    /// Control the built-in device profile backend
+    ProfileCtl {
+        /// Structured device-profile command
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -379,6 +386,14 @@ pub fn run() -> Result<()> {
         }
 
         Commands::Sepolicy(sepolicy_args) => crate::sepolicy::execute(&sepolicy_args),
+
+        Commands::ProfileCtl { command } => {
+            let output = supercall::profile_kpm_control(&command.join(" "))?;
+            if !output.is_empty() {
+                println!("{output}");
+            }
+            Ok(())
+        }
     };
 
     if let Err(e) = &result {

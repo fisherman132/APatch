@@ -24,6 +24,20 @@ val managerVersionCode: Int by rootProject.extra
 val managerVersionName: String by rootProject.extra
 val branchName: String by rootProject.extra
 val kernelPatchVersion: String by rootProject.extra
+val restrictedKernelPatchRoot =
+    providers
+        .gradleProperty("restricted.kernelPatchRoot")
+        .map(rootProject::file)
+        .orElse(providers.provider { rootProject.file("../../KernelPatch") })
+val restrictedProfileRoot =
+    providers
+        .gradleProperty("restricted.profileRoot")
+        .map(rootProject::file)
+        .orElse(
+            providers.provider {
+                rootProject.file("../改机-restricted-apatch-kpm")
+            }
+        )
 
 apksign {
     storeFileProperty = "KEYSTORE_FILE"
@@ -237,12 +251,22 @@ fun downloadFileRetry(url: String, destFile: File, maxRetries: Int = 5) {
     }
 }
 
-registerDownloadTask(
-    taskName = "downloadKpimg",
-    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
-    destPath = "${project.projectDir}/src/main/assets/kpimg",
-    project = project
-)
+tasks.register<Copy>("stageRestrictedProfileArtifacts") {
+    val kpimg = restrictedKernelPatchRoot.map { it.resolve("kernel/kpimg") }
+    val profileKpm = restrictedProfileRoot.map { it.resolve("kpm/device_profile.kpm") }
+    inputs.files(kpimg, profileKpm)
+    into("${project.projectDir}/src/main/assets")
+    from(kpimg)
+    from(profileKpm)
+    doFirst {
+        require(kpimg.get().isFile) {
+            "Restricted KernelPatch image is missing: ${kpimg.get()}"
+        }
+        require(profileKpm.get().isFile) {
+            "Built-in device profile KPM is missing: ${profileKpm.get()}"
+        }
+    }
+}
 
 registerDownloadTask(
     taskName = "downloadKptools",
@@ -296,7 +320,7 @@ tasks.register<Copy>("mergeScripts") {
 }
 
 tasks.getByName("preBuild").dependsOn(
-    "downloadKpimg",
+    "stageRestrictedProfileArtifacts",
     "downloadKptools",
     "downloadCompatKpatch",
     "downloadJailbreakKo",
