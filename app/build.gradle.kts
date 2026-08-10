@@ -37,7 +37,7 @@ val restrictedProfileRoot =
         .map(rootProject::file)
         .orElse(
             providers.provider {
-                rootProject.file("../改机-restricted-apatch-kpm")
+                rootProject.file("../改机")
             }
         )
 
