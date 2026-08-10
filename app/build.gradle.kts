@@ -24,6 +24,8 @@ val managerVersionCode: Int by rootProject.extra
 val managerVersionName: String by rootProject.extra
 val branchName: String by rootProject.extra
 val kernelPatchVersion: String by rootProject.extra
+val restrictedManagerPackageName =
+    providers.gradleProperty("restricted.managerPackageName").getOrElse("me.bmax.apatch")
 val restrictedKernelPatchRoot =
     providers
         .gradleProperty("restricted.kernelPatchRoot")
@@ -120,6 +122,7 @@ android {
     }
 
     defaultConfig {
+        applicationId = restrictedManagerPackageName
         minSdk = androidMinSdkVersion
         targetSdk = androidTargetSdkVersion
         versionCode = managerVersionCode
