@@ -30,14 +30,14 @@ val restrictedKernelPatchRoot =
     providers
         .gradleProperty("restricted.kernelPatchRoot")
         .map(rootProject::file)
-        .orElse(providers.provider { rootProject.file("../../KernelPatch") })
+        .orElse(providers.provider { rootProject.file("../KernelPatch") })
 val restrictedProfileRoot =
     providers
         .gradleProperty("restricted.profileRoot")
         .map(rootProject::file)
         .orElse(
             providers.provider {
-                rootProject.file("../改机")
+                rootProject.file("../..")
             }
         )
 
