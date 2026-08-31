@@ -27,6 +27,8 @@ fun getGitDescribe(): String {
 }
 
 fun getVersionCode(): Int {
+    val override = providers.gradleProperty("manager.versionCodeOverride").orNull
+    if (override != null) return override.toInt()
     val commitCount = getGitCommitCount()
     val major = 1
     return major * 10000 + commitCount + 200

@@ -23,6 +23,8 @@ import okhttp3.Cache
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
@@ -80,6 +82,8 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
 
         const val SP_NAME = "config"
         private const val SHOW_BACKUP_WARN = "show_backup_warning"
+        private const val AUTO_PRODUCT_SCHEMA_KEY = "auto_product_schema"
+        private const val AUTO_PRODUCT_SCHEMA = 2
         lateinit var sharedPreferences: SharedPreferences
 
         private val logCallback: CallbackList<String?> = object : CallbackList<String?>() {
@@ -93,82 +97,219 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
 
         private val _apStateLiveData = MutableLiveData(State.UNKNOWN_STATE)
         val apStateLiveData: LiveData<State> = _apStateLiveData
+        private val autoAndroidPatchAttempted = AtomicBoolean(false)
 
-        @Suppress("DEPRECATION")
-        fun uninstallApatch() {
-            if (_apStateLiveData.value != State.ANDROIDPATCH_INSTALLED) return
-            _apStateLiveData.value = State.ANDROIDPATCH_UNINSTALLING
+        data class AndroidPatchCommandResult(
+            val success: Boolean,
+            val output: String,
+        )
 
-            Natives.resetSuPath(DEFAULT_SU_PATH)
-
-            val cmds = arrayOf(
-                "rm -f $APD_PATH",
-                "rm -f $KPATCH_PATH",
-                "rm -rf $APATCH_BIN_FOLDER",
-                "rm -rf $APATCH_LOG_FOLDER",
-                "rm -rf $APATCH_VERSION_PATH",
-            )
-
-            val shell = getRootShell()
-            shell.newJob().add(*cmds).to(logCallback, logCallback).exec()
-
-            Log.d(TAG, "APatch uninstalled...")
-            if (_kpStateLiveData.value == State.UNKNOWN_STATE) {
-                _apStateLiveData.postValue(State.UNKNOWN_STATE)
-            } else {
-                _apStateLiveData.postValue(State.ANDROIDPATCH_NOT_INSTALLED)
+        fun runRestrictedAndroidPatch(action: String): AndroidPatchCommandResult {
+            require(action == "install" || action == "uninstall" || action == "status")
+            return runCatching {
+                val actionCode = when (action) {
+                    "status" -> 0
+                    "install" -> 1
+                    else -> 2
+                }
+                var result = Natives.androidPatchAction(actionCode)
+                if (action == "install") {
+                    var preparationAttempts = 0
+                    while ((result == -1L || result == -2L) && preparationAttempts < 30) {
+                        Thread.sleep(100)
+                        result = Natives.androidPatchAction(actionCode)
+                        preparationAttempts++
+                    }
+                }
+                if (action != "status" && result == 0L) {
+                    val sourceDir = apApp.applicationInfo.nativeLibraryDir
+                    val arguments = mutableListOf(
+                        "/system/bin/linker64",
+                        APD_PATH,
+                        "internal-androidpatch",
+                        action,
+                    )
+                    if (action == "install") {
+                        arguments += listOf("--source-dir", sourceDir)
+                    }
+                    val process = ProcessBuilder(arguments).redirectErrorStream(true).start()
+                    if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                        return AndroidPatchCommandResult(false, "AndroidPatch installer timed out")
+                    }
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                    val installerExit = process.exitValue()
+                    val expectedVersion = if (action == "install") {
+                        Version.getManagerVersion().second
+                    } else {
+                        0L
+                    }
+                    var installedVersion = Natives.androidPatchAction(0)
+                    var statusAttempts = 0
+                    while (installedVersion != expectedVersion && statusAttempts < 20) {
+                        Thread.sleep(100)
+                        installedVersion = Natives.androidPatchAction(0)
+                        statusAttempts++
+                    }
+                    return AndroidPatchCommandResult(
+                        installerExit == 0 && installedVersion == expectedVersion,
+                        if (output.isNotEmpty()) {
+                            "$output exit=$installerExit version=$installedVersion"
+                        } else {
+                            "installer=$installerExit version=$installedVersion"
+                        },
+                    )
+                }
+                when (action) {
+                    "status" -> AndroidPatchCommandResult(
+                        result >= 0,
+                        "androidpatch=${if (result > 0) "installed" else "not-installed"} version=$result",
+                    )
+                    "install" -> AndroidPatchCommandResult(
+                        result == 0L,
+                        if (result == 0L) "androidpatch=installed" else "error=$result",
+                    )
+                    else -> AndroidPatchCommandResult(
+                        result == 0L,
+                        if (result == 0L) "androidpatch=uninstalled" else "error=$result",
+                    )
+                }
+            }.getOrElse { throwable ->
+                Log.w(TAG, "Restricted AndroidPatch $action unavailable", throwable)
+                AndroidPatchCommandResult(false, throwable.message.orEmpty())
             }
         }
 
         @Suppress("DEPRECATION")
-        fun installApatch() {
+        fun uninstallApatch(): Boolean {
+            val previousState = _apStateLiveData.value
+            if (previousState != State.ANDROIDPATCH_INSTALLED) return false
+            _apStateLiveData.postValue(State.ANDROIDPATCH_UNINSTALLING)
+
+            return runCatching {
+                val restricted = runRestrictedAndroidPatch("uninstall")
+                if (restricted.success) {
+                    Log.d(TAG, "APatch uninstalled through restricted manager channel")
+                    sharedPreferences.edit { remove(AUTO_PRODUCT_SCHEMA_KEY) }
+                    _apStateLiveData.postValue(State.ANDROIDPATCH_NOT_INSTALLED)
+                    return true
+                }
+                Log.i(TAG, "Restricted AndroidPatch uninstall unavailable: ${restricted.output}")
+
+                Natives.resetSuPath(DEFAULT_SU_PATH)
+
+                val cmds = arrayOf(
+                    "rm -f $APD_PATH",
+                    "rm -f $KPATCH_PATH",
+                    "rm -rf $APATCH_BIN_FOLDER",
+                    "rm -rf $APATCH_LOG_FOLDER",
+                    "rm -rf $APATCH_VERSION_PATH",
+                )
+
+                val shell = getRootShell()
+                if (!shell.isRoot) {
+                    Log.e(TAG, "APatch uninstall failed: root shell is unavailable")
+                    _apStateLiveData.postValue(previousState)
+                    return false
+                }
+                val result = shell.newJob().add(*cmds).to(logCallback, logCallback).exec()
+                if (!result.isSuccess) {
+                    Log.e(TAG, "APatch uninstall failed: ${result.err.joinToString("\n")}")
+                    _apStateLiveData.postValue(previousState)
+                    return false
+                }
+
+                Log.d(TAG, "APatch uninstalled...")
+                if (_kpStateLiveData.value == State.UNKNOWN_STATE) {
+                    _apStateLiveData.postValue(State.UNKNOWN_STATE)
+                } else {
+                    _apStateLiveData.postValue(State.ANDROIDPATCH_NOT_INSTALLED)
+                }
+                true
+            }.getOrElse { throwable ->
+                Log.e(TAG, "APatch uninstall crashed", throwable)
+                _apStateLiveData.postValue(previousState)
+                false
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        fun installApatch(): Boolean {
             val state = _apStateLiveData.value
             if (state != State.ANDROIDPATCH_NOT_INSTALLED && state != State.ANDROIDPATCH_NEED_UPDATE) {
-                return
+                return false
             }
-            _apStateLiveData.value = State.ANDROIDPATCH_INSTALLING
-            val nativeDir = apApp.applicationInfo.nativeLibraryDir
+            _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLING)
 
-            Natives.resetSuPath(LEGACY_SU_PATH)
+            return runCatching {
+                val restricted = runRestrictedAndroidPatch("install")
+                if (restricted.success) {
+                    Log.d(TAG, "APatch installed through restricted manager channel")
+                    sharedPreferences.edit {
+                        putInt(AUTO_PRODUCT_SCHEMA_KEY, AUTO_PRODUCT_SCHEMA)
+                    }
+                    _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
+                    return true
+                }
+                Log.i(TAG, "Restricted AndroidPatch install unavailable: ${restricted.output}")
 
-            val cmds = arrayOf(
-                "mkdir -p $APATCH_BIN_FOLDER",
-                "mkdir -p $APATCH_LOG_FOLDER",
+                val nativeDir = apApp.applicationInfo.nativeLibraryDir
 
-                "cp -f ${nativeDir}/libapd.so $APD_PATH",
-                "chmod +x $APD_PATH",
-                "ln -s $APD_PATH $APD_LINK_PATH",
-                "restorecon $APD_PATH",
+                Natives.resetSuPath(LEGACY_SU_PATH)
 
-                "rm -f $MAGISKPOLICY_BIN_PATH",
-                "ln -s $APD_PATH $MAGISKPOLICY_BIN_PATH",
-                "rm -f $RESETPROP_BIN_PATH",
-                "ln -s $APD_PATH $RESETPROP_BIN_PATH",
-               
-                "cp -f ${nativeDir}/libbusybox.so $BUSYBOX_BIN_PATH",
-                "chmod +x $BUSYBOX_BIN_PATH",
-                "cp -f ${nativeDir}/libkptools.so $KPTOOLS_BIN_PATH",
-                "chmod +x $KPTOOLS_BIN_PATH",
+                val cmds = arrayOf(
+                    "mkdir -p $APATCH_BIN_FOLDER",
+                    "mkdir -p $APATCH_LOG_FOLDER",
 
+                    "cp -f ${nativeDir}/libapd.so $APD_PATH",
+                    "chmod +x $APD_PATH",
+                    "ln -s $APD_PATH $APD_LINK_PATH",
+                    "restorecon $APD_PATH",
 
+                    "rm -f $MAGISKPOLICY_BIN_PATH",
+                    "ln -s $APD_PATH $MAGISKPOLICY_BIN_PATH",
+                    "rm -f $RESETPROP_BIN_PATH",
+                    "ln -s $APD_PATH $RESETPROP_BIN_PATH",
 
-                "touch $PACKAGE_CONFIG_FILE",
-                "touch $SU_PATH_FILE",
-                "[ -s $SU_PATH_FILE ] || echo $LEGACY_SU_PATH > $SU_PATH_FILE",
-                "echo ${Version.getManagerVersion().second} > $APATCH_VERSION_PATH",
-                "restorecon -R $APATCH_FOLDER",
+                    "cp -f ${nativeDir}/libbusybox.so $BUSYBOX_BIN_PATH",
+                    "chmod +x $BUSYBOX_BIN_PATH",
+                    "cp -f ${nativeDir}/libkptools.so $KPTOOLS_BIN_PATH",
+                    "chmod +x $KPTOOLS_BIN_PATH",
 
-                "${nativeDir}/libmagiskpolicy.so --magisk --live",
-            )
+                    "touch $PACKAGE_CONFIG_FILE",
+                    "touch $SU_PATH_FILE",
+                    "[ -s $SU_PATH_FILE ] || echo $LEGACY_SU_PATH > $SU_PATH_FILE",
+                    "echo ${Version.getManagerVersion().second} > $APATCH_VERSION_PATH",
+                    "restorecon -R $APATCH_FOLDER",
 
-            val shell = getRootShell()
-            shell.newJob().add(*cmds).to(logCallback, logCallback).exec()
+                    "${nativeDir}/libmagiskpolicy.so --magisk --live",
+                )
 
-            // clear shell cache
-            APatchCli.refresh()
+                val shell = getRootShell()
+                if (!shell.isRoot) {
+                    Log.e(TAG, "APatch install failed: root shell is unavailable")
+                    _apStateLiveData.postValue(state)
+                    return false
+                }
+                val result = shell.newJob().add(*cmds).to(logCallback, logCallback).exec()
+                if (!result.isSuccess) {
+                    Log.e(TAG, "APatch install failed: ${result.err.joinToString("\n")}")
+                    _apStateLiveData.postValue(state)
+                    return false
+                }
 
-            Log.d(TAG, "APatch installed...")
-            _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
+                runCatching { APatchCli.refresh() }.onFailure {
+                    Log.w(TAG, "APatch shell refresh failed after install", it)
+                }
+
+                Log.d(TAG, "APatch installed...")
+                _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
+                true
+            }.getOrElse { throwable ->
+                Log.e(TAG, "APatch install crashed", throwable)
+                _apStateLiveData.postValue(state)
+                false
+            }
         }
 
         fun markNeedReboot() {
@@ -190,10 +331,14 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                 if (!ready) return
 
                 thread {
+                    val restrictedStatus = runRestrictedAndroidPatch("status")
                     val rc = Natives.su(0, null)
-                    if (!rc) {
+                    if (!rc && !restrictedStatus.success) {
                         Log.e(TAG, "Native.su failed")
                         return@thread
+                    }
+                    if (!rc) {
+                        Log.i(TAG, "Using restricted AndroidPatch manager channel")
                     }
 
                     // KernelPatch version
@@ -222,12 +367,14 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                     val installedApdVInt = Version.installedApdVUInt()
                     Log.d(TAG, "manager version: $mgv, installed apd version: $installedApdVInt")
 
-                    if (Version.installedApdVInt > 0) {
-                        _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
+                    var detectedState = when {
+                        installedApdVInt <= 0 -> State.ANDROIDPATCH_NOT_INSTALLED
+                        mgv.toInt() != installedApdVInt -> State.ANDROIDPATCH_NEED_UPDATE
+                        else -> State.ANDROIDPATCH_INSTALLED
                     }
+                    _apStateLiveData.postValue(detectedState)
 
-                    if (Version.installedApdVInt > 0 && mgv.toInt() != Version.installedApdVInt) {
-                        _apStateLiveData.postValue(State.ANDROIDPATCH_NEED_UPDATE)
+                    if (detectedState == State.ANDROIDPATCH_NEED_UPDATE) {
                         // su path
                         val suPathFile = File(SU_PATH_FILE)
                         if (suPathFile.exists()) {
@@ -238,7 +385,42 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                             }
                         }
                     }
-                    Log.d(TAG, "ap state: " + _apStateLiveData.value)
+                    val productBootstrapNeeded =
+                        detectedState != State.ANDROIDPATCH_INSTALLED ||
+                            sharedPreferences.getInt(AUTO_PRODUCT_SCHEMA_KEY, 0) !=
+                            AUTO_PRODUCT_SCHEMA
+                    if (restrictedStatus.success && productBootstrapNeeded &&
+                        autoAndroidPatchAttempted.compareAndSet(false, true)) {
+                        Log.i(TAG, "Automatically initializing AndroidPatch")
+                        val initialization = runRestrictedAndroidPatch("install")
+                        if (initialization.success) {
+                            detectedState = State.ANDROIDPATCH_INSTALLED
+                            sharedPreferences.edit {
+                                putInt(AUTO_PRODUCT_SCHEMA_KEY, AUTO_PRODUCT_SCHEMA)
+                            }
+                            _apStateLiveData.postValue(detectedState)
+                            if (File(NEED_REBOOT_FILE).exists()) {
+                                _kpStateLiveData.postValue(State.KERNELPATCH_NEED_REBOOT)
+                            }
+                        } else {
+                            detectedState = if (installedApdVInt > 0) {
+                                State.ANDROIDPATCH_NEED_UPDATE
+                            } else {
+                                State.ANDROIDPATCH_NOT_INSTALLED
+                            }
+                            _apStateLiveData.postValue(detectedState)
+                            Log.w(TAG, "Automatic AndroidPatch initialization failed: ${initialization.output}")
+                        }
+                    } else if ((detectedState == State.ANDROIDPATCH_NOT_INSTALLED ||
+                            detectedState == State.ANDROIDPATCH_NEED_UPDATE) &&
+                        autoAndroidPatchAttempted.compareAndSet(false, true)
+                    ) {
+                        Log.i(TAG, "Automatically initializing AndroidPatch through legacy root")
+                        if (!installApatch()) {
+                            Log.w(TAG, "Automatic AndroidPatch initialization failed")
+                        }
+                    }
+                    Log.d(TAG, "ap state: $detectedState")
 
                     return@thread
                 }

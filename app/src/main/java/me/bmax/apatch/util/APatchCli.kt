@@ -102,7 +102,9 @@ private fun createMainRootShell() : Shell {
         }
     }
 
-    MainShell.setBuilder(builder)
+    runCatching { MainShell.setBuilder(builder) }.onFailure {
+        Log.w(TAG, "main shell builder is already initialized", it)
+    }
     return shell
 }
 

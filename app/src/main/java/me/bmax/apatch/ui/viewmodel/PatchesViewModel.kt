@@ -116,7 +116,7 @@ class PatchesViewModel : ViewModel() {
                     kpimg["compile_time"].toString(),
                     kpimg["config"].toString(),
                     "",     // manager no longer keeps a separate superkey
-                    kpimg["root_superkey"].toString(),   // empty
+                    kpimg["root_superkey"].toString().takeUnless(::isRedactedKeyState).orEmpty(),
                 )
             } else {
                 error += "parse kpimg error\n"
@@ -145,7 +145,9 @@ class PatchesViewModel : ViewModel() {
             }
             kimgInfo = KPModel.KImgInfo(kernel["banner"].toString(), kernel["patched"].toBoolean())
             if (kimgInfo.patched) {
-                val superkey = ini["kpimg"]?.getOrDefault("superkey", "") ?: ""
+                val superkey = (ini["kpimg"]?.getOrDefault("superkey", "") ?: "")
+                    .takeUnless(::isRedactedKeyState)
+                    .orEmpty()
                 kpimgInfo.superKey = superkey
                 if (checkSuperKeyValidation(superkey)) {
                     this.superkey = superkey
@@ -191,6 +193,9 @@ class PatchesViewModel : ViewModel() {
     val checkSuperKeyValidation: (superKey: String) -> Boolean = { superKey ->
         superKey.length in 8..63 && superKey.any { it.isDigit() } && superKey.any { it.isLetter() }
     }
+
+    private fun isRedactedKeyState(value: String): Boolean =
+        value == "<configured>" || value == "<unset>"
 
     fun copyAndParseBootimg(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -288,9 +293,16 @@ class PatchesViewModel : ViewModel() {
                 val ini = Ini(StringReader(result.out.joinToString("\n")))
                 val kpm = ini["kpm"]
                 if (kpm != null) {
+                    val name = kpm["name"].toString()
+                    if (name == "device-profile") {
+                        kpmFile.delete()
+                        error = "device-profile must remain external and be loaded from the KPM screen\n"
+                        running = false
+                        return@launch
+                    }
                     val kpmInfo = KPModel.KPMInfo(
                         KPModel.ExtraType.KPM,
-                        kpm["name"].toString(),
+                        name,
                         KPModel.TriggerEvent.PRE_KERNEL_INIT.event,
                         "",
                         kpm["version"].toString(),
@@ -392,25 +404,45 @@ class PatchesViewModel : ViewModel() {
                 patchCommand.addAll(listOf(superkey, srcBoot.path))
             }
 
+            val replacingKshCore = newExtras.any {
+                it.type == KPModel.ExtraType.KPM && it.name == "ksh-core"
+            }
             for (i in 0..<newExtrasFileName.size) {
-                patchCommand.addAll(listOf("-M", newExtrasFileName[i]))
                 val extra = newExtras[i]
+                patchCommand.addAll(listOf("-M", newExtrasFileName[i]))
                 if (extra.args.isNotEmpty()) {
                     patchCommand.addAll(listOf("-A", extra.args))
                 }
-                if (extra.event.isNotEmpty()) {
-                    patchCommand.addAll(listOf("-V", extra.event))
+                val event = if (extra.type == KPModel.ExtraType.KPM &&
+                    extra.name == "ksh-core") {
+                    KPModel.TriggerEvent.PRE_KERNEL_INIT.event
+                } else {
+                    extra.event
+                }
+                if (event.isNotEmpty()) {
+                    patchCommand.addAll(listOf("-V", event))
                 }
                 patchCommand.addAll(listOf("-T", extra.type.desc))
             }
             for (i in 0..<existedExtras.size) {
                 val extra = existedExtras[i]
+                if (extra.type == KPModel.ExtraType.KPM &&
+                    (extra.name == "device-profile" ||
+                        (extra.name == "ksh-core" && replacingKshCore))) {
+                    continue
+                }
                 patchCommand.addAll(listOf("-E", extra.name))
                 if (extra.args.isNotEmpty()) {
                     patchCommand.addAll(listOf("-A", extra.args))
                 }
-                if (extra.event.isNotEmpty()) {
-                    patchCommand.addAll(listOf("-V", extra.event))
+                val event = if (extra.type == KPModel.ExtraType.KPM &&
+                    extra.name == "ksh-core") {
+                    KPModel.TriggerEvent.PRE_KERNEL_INIT.event
+                } else {
+                    extra.event
+                }
+                if (event.isNotEmpty()) {
+                    patchCommand.addAll(listOf("-V", event))
                 }
                 patchCommand.addAll(listOf("-T", extra.type.desc))
             }

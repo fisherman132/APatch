@@ -1,5 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="device_profiles">改机应用</string>
+    <string name="device_profiles_search">搜索用户 0 应用</string>
+    <string name="profile_app_list_empty">未找到用户 0 应用</string>
+    <string name="profile_refresh">刷新</string>
+    <string name="profile_status">改机状态</string>
+    <string name="profile_configured">身份控制器已配置</string>
+    <string name="profile_not_configured">此应用尚未创建分身</string>
+    <string name="profile_active_slot_value">活动槽位：%1$s</string>
+    <string name="profile_generation_value">代次：%1$d</string>
+    <string name="profile_none">无</string>
+    <string name="profile_slots">应用分身</string>
+    <string name="profile_no_slots">暂无分身。新增第一个分身时会保存应用当前数据。</string>
+    <string name="profile_active">活动中</string>
+    <string name="profile_stored">已保存</string>
+    <string name="profile_create_slot">新增分身</string>
+    <string name="profile_slot_name">分身名称</string>
+    <string name="profile_invalid_slot_name">使用 1–64 个字母、数字、点、下划线或连字符，并以字母或数字开头。</string>
+    <string name="profile_capture_current">捕获当前应用数据</string>
+    <string name="profile_capture_first_hint">创建首个槽位时必须启用。</string>
+    <string name="profile_capture_later_hint">首个槽位之后的新槽位从干净数据开始。</string>
+    <string name="profile_create">创建</string>
+    <string name="profile_save_active">保存活动槽位</string>
+    <string name="profile_stop_active">停止活动槽位</string>
+    <string name="profile_switch">切换到该槽位</string>
+    <string name="profile_delete">删除</string>
+    <string name="profile_delete_title">删除应用分身？</string>
+    <string name="profile_delete_message">删除分身“%1$s”？如果它处于活动状态，将先保存并停止，再执行删除。</string>
+    <string name="profile_cancel">取消</string>
+    <string name="profile_created">应用分身已创建</string>
+    <string name="profile_saved">活动身份已保存</string>
+    <string name="profile_switched">身份已切换</string>
+    <string name="profile_stopped">活动身份已停止</string>
+    <string name="profile_deleted">应用分身已删除</string>
+    <string name="profile_operation_failed">身份操作失败：%1$s</string>
+    <string name="profile_unavailable">改机分身功能不可用</string>
+    <string name="profile_controller_required">请安装并启用 KSH 画像控制器模块，然后刷新此页面。</string>
+    <string name="profile_first_slot_required">尚未创建应用分身</string>
+    <string name="profile_first_slot_hint">新增第一个分身会保存应用当前数据，并启用后续分身切换。</string>
     <string name="apm">系统模块</string>
     <string name="super_key">超级密钥</string>
     <string name="app_name" translatable="false">APatch</string>
@@ -44,6 +82,7 @@
     <string name="home_apatch_version">APatch 版本</string>
     <string name="home_su_path">可执行su路径</string>
     <string name="home_ap_cando_update">更新</string>
+    <string name="apatch_operation_failed">系统补丁操作失败</string>
     <string name="apatch_version_update">版本：%1$s → %2$s</string>
     <string name="home_kernel">内核版本</string>
     <string name="patch_title">修补</string>
@@ -64,6 +103,13 @@
     <string name="home_selinux_status_enforcing">强制模式</string>
     <string name="kpm_license">许可</string>
     <string name="kpm_apm_empty">尚未加载模块</string>
+    <string name="kpm_manual_load_notice">ksh-core 由已修补的 boot 在 pre-kernel-init 加载。这里只加载产品 KPM；产品 KPM 重启后不会自动恢复。</string>
+    <string name="kpm_profile_reconciled">KPM 已加载，活动分身状态已恢复</string>
+    <string name="kpm_profile_reconcile_failed">KPM 已加载，但活动分身状态恢复失败</string>
+    <string name="kpm_load_core_required">请先加载 ksh-core，再加载 device-profile</string>
+    <string name="kpm_inspection_failed">无法校验所选 KPM</string>
+    <string name="kpm_load_core_unsafe">ksh-core 未在 pre-kernel-init 阶段激活；请修补 boot 并重启</string>
+    <string name="kpm_load_core_reboot_required">ksh-core 必须以 pre-kernel-init 固化到启动镜像；请修补 boot 并重启</string>
     <string name="kpm_load_toast_succ">加载成功</string>
     <string name="su_pkg_excluded_setting_title">排除修改</string>
     <string name="su_pkg_excluded_setting_summary">针对此应用还原被模块改动的文件。</string>

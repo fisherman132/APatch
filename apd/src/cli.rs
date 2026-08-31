@@ -1,4 +1,7 @@
-use crate::{defs, event, insmod, late_load, lua, magica, module, module_config, supercall, utils};
+use crate::{
+    androidpatch, defs, event, insmod, late_load, lua, magica, module, module_config, supercall,
+    utils,
+};
 #[cfg(target_os = "android")]
 use android_logger::Config;
 use anyhow::{Context, Result};
@@ -83,6 +86,29 @@ enum Commands {
 
     /// MagiskPolicy - SELinux Policy Patch Tool
     Sepolicy(crate::sepolicy::Args),
+
+    /// Control the manually loaded device profile backend
+    ProfileCtl {
+        /// Structured device-profile command
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        command: Vec<String>,
+    },
+
+    #[command(hide = true)]
+    InternalAndroidpatch {
+        #[command(subcommand)]
+        action: AndroidPatchAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum AndroidPatchAction {
+    Install {
+        #[arg(long)]
+        source_dir: PathBuf,
+    },
+    Uninstall,
+    Status,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -379,6 +405,22 @@ pub fn run() -> Result<()> {
         }
 
         Commands::Sepolicy(sepolicy_args) => crate::sepolicy::execute(&sepolicy_args),
+
+        Commands::ProfileCtl { command } => {
+            let output = supercall::profile_kpm_control(&command.join(" "))?;
+            if !output.is_empty() {
+                println!("{output}");
+            }
+            Ok(())
+        }
+
+        Commands::InternalAndroidpatch { action } => match action {
+            AndroidPatchAction::Install { source_dir } => {
+                androidpatch::install(Some(source_dir.as_path()))
+            }
+            AndroidPatchAction::Uninstall => androidpatch::uninstall(),
+            AndroidPatchAction::Status => androidpatch::status(),
+        },
     };
 
     if let Err(e) = &result {

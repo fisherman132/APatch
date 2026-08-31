@@ -20,20 +20,6 @@ object Natives {
         var scontext: String = APApplication.DEFAULT_SCONTEXT,
     ) : Parcelable
 
-    @Keep
-    class KPMCtlRes {
-        var rc: Long = 0
-        var outMsg: String? = null
-
-        constructor()
-
-        constructor(rc: Long, outMsg: String?) {
-            this.rc = rc
-            this.outMsg = outMsg
-        }
-    }
-
-
     @FastNative
     private external fun nativeSu(superKey: String, toUid: Int, scontext: String?): Long
 
@@ -47,6 +33,12 @@ object Natives {
 
     @FastNative
     external fun nativeReady(superKey: String): Boolean
+
+    private external fun nativeAndroidPatchAction(superKey: String, action: Int): Long
+
+    fun androidPatchAction(action: Int): Long {
+        return nativeAndroidPatchAction(APApplication.superKey, action)
+    }
 
     @FastNative
     private external fun nativeSuPath(superKey: String): String
@@ -69,65 +61,55 @@ object Natives {
     }
 
     @FastNative
+    external fun nativeRestrictedKpmReady(): Boolean
+
+    @FastNative
     private external fun nativeKernelPatchBuildTime(superKey: String): String
     fun kernelPatchBuildTime(): String {
         return nativeKernelPatchBuildTime(APApplication.superKey)
     }
 
-    private external fun nativeLoadKernelPatchModule(
-        superKey: String, modulePath: String, args: String
-    ): Long
-
-    fun loadKernelPatchModule(modulePath: String, args: String): Long {
-        return nativeLoadKernelPatchModule(APApplication.superKey, modulePath, args)
-    }
-
-    private external fun nativeUnloadKernelPatchModule(superKey: String, moduleName: String): Long
-    fun unloadKernelPatchModule(moduleName: String): Long {
-        return nativeUnloadKernelPatchModule(APApplication.superKey, moduleName)
+    @Keep
+    class KPMCtlRes {
+        var rc: Long = -1
+        var outMsg: String? = null
     }
 
     @FastNative
     private external fun nativeKernelPatchModuleNum(superKey: String): Long
-
-    fun kernelPatchModuleNum(): Long {
-        return nativeKernelPatchModuleNum(APApplication.superKey)
-    }
+    fun kernelPatchModuleNum(): Long = nativeKernelPatchModuleNum(APApplication.superKey)
 
     @FastNative
     private external fun nativeKernelPatchModuleList(superKey: String): String
-    fun kernelPatchModuleList(): String {
-        return nativeKernelPatchModuleList(APApplication.superKey)
-    }
+    fun kernelPatchModuleList(): String = nativeKernelPatchModuleList(APApplication.superKey)
 
     @FastNative
-    private external fun nativeKernelPatchModuleInfo(superKey: String, moduleName: String): String
-    fun kernelPatchModuleInfo(moduleName: String): String {
-        return nativeKernelPatchModuleInfo(APApplication.superKey, moduleName)
-    }
+    private external fun nativeKernelPatchModuleInfo(
+        superKey: String, moduleName: String): String
+    fun kernelPatchModuleInfo(moduleName: String): String =
+        nativeKernelPatchModuleInfo(APApplication.superKey, moduleName)
 
+    @FastNative
     private external fun nativeControlKernelPatchModule(
-        superKey: String, modName: String, jctlargs: String
-    ): KPMCtlRes
-
-    fun kernelPatchModuleControl(moduleName: String, controlArg: String): KPMCtlRes {
-        return nativeControlKernelPatchModule(APApplication.superKey, moduleName, controlArg)
-    }
+        superKey: String, moduleName: String, controlArg: String): KPMCtlRes
+    fun kernelPatchModuleControl(moduleName: String, controlArg: String): KPMCtlRes =
+        nativeControlKernelPatchModule(APApplication.superKey, moduleName, controlArg)
 
     @FastNative
-    private external fun nativeGrantSu(
-        superKey: String, uid: Int, toUid: Int, scontext: String?
-    ): Long
-
-    fun grantSu(uid: Int, toUid: Int, scontext: String?): Long {
-        return nativeGrantSu(APApplication.superKey, uid, toUid, scontext)
-    }
+    private external fun nativeLoadKernelPatchModule(
+        superKey: String, modulePath: String, args: String): Long
+    fun loadKernelPatchModule(modulePath: String, args: String): Long =
+        nativeLoadKernelPatchModule(APApplication.superKey, modulePath, args)
 
     @FastNative
-    private external fun nativeRevokeSu(superKey: String, uid: Int): Long
-    fun revokeSu(uid: Int): Long {
-        return nativeRevokeSu(APApplication.superKey, uid)
-    }
+    private external fun nativeUnloadKernelPatchModule(
+        superKey: String, moduleName: String): Long
+    fun unloadKernelPatchModule(moduleName: String): Long =
+        nativeUnloadKernelPatchModule(APApplication.superKey, moduleName)
+
+    fun grantSu(uid: Int, toUid: Int, scontext: String?): Long = -1
+
+    fun revokeSu(uid: Int): Long = -1
 
     @FastNative
     private external fun nativeSetUidExclude(superKey: String, uid: Int, exclude: Int): Int

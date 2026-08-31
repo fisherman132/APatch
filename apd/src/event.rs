@@ -271,7 +271,6 @@ fn run_uid_monitor() {
 
 pub fn on_boot_completed(superkey: Option<String>) -> Result<()> {
     info!("on_boot_completed triggered!");
-
     run_stage("boot-completed", superkey, false);
 
     run_uid_monitor();

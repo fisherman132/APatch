@@ -105,6 +105,13 @@ static inline uint32_t sc_k_ver(const char *key)
     return (uint32_t)ret;
 }
 
+static inline long sc_androidpatch_action(const char *key, int action)
+{
+    if (!key || !key[0]) return -EINVAL;
+    return syscall(__NR_supercall, key,
+                   ver_and_cmd(key, SUPERCALL_ANDROIDPATCH_ACTION), action);
+}
+
 /**
  * @brief Substitute user of current thread
  * 

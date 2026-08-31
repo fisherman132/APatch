@@ -1,3 +1,4 @@
+mod androidpatch;
 mod apd;
 mod assets;
 mod cli;

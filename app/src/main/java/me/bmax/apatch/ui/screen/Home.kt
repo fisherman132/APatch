@@ -110,6 +110,9 @@ private val managerVersion = getManagerVersion()
 fun HomeScreen(navigator: DestinationsNavigator) {
     val kpState by APApplication.kpStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
     val apState by APApplication.apStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val operationFailed = stringResource(R.string.apatch_operation_failed)
 
     Scaffold(topBar = {
         TopBar(onInstallClick = dropUnlessResumed {
@@ -127,7 +130,13 @@ fun HomeScreen(navigator: DestinationsNavigator) {
             WarningCard()
             KStatusCard(kpState, apState, navigator)
             if (kpState != APApplication.State.UNKNOWN_STATE && apState != APApplication.State.ANDROIDPATCH_INSTALLED) {
-                AStatusCard(apState)
+                AStatusCard(
+                    apState = apState,
+                    onOperationFailed = {
+                        Toast.makeText(context, operationFailed, Toast.LENGTH_SHORT).show()
+                    },
+                    scope = scope,
+                )
             }
             val checkUpdate = APApplication.sharedPreferences.getBoolean("check_update", true)
             if (checkUpdate) {
@@ -512,7 +521,11 @@ private fun KStatusCard(
 }
 
 @Composable
-private fun AStatusCard(apState: APApplication.State) {
+private fun AStatusCard(
+    apState: APApplication.State,
+    onOperationFailed: () -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope,
+) {
     ElevatedCard(
         colors = CardDefaults.elevatedCardColors(containerColor = run {
             MaterialTheme.colorScheme.secondaryContainer
@@ -618,15 +631,25 @@ private fun AStatusCard(apState: APApplication.State) {
                         Button(onClick = {
                             when (apState) {
                                 APApplication.State.ANDROIDPATCH_NOT_INSTALLED, APApplication.State.ANDROIDPATCH_NEED_UPDATE -> {
-                                    APApplication.installApatch()
+                                    scope.launch {
+                                        val success = withContext(Dispatchers.IO) {
+                                            APApplication.installApatch()
+                                        }
+                                        if (!success) onOperationFailed()
+                                    }
                                 }
 
-                                APApplication.State.ANDROIDPATCH_UNINSTALLING -> {
+                                APApplication.State.ANDROIDPATCH_INSTALLING, APApplication.State.ANDROIDPATCH_UNINSTALLING -> {
                                     // Do nothing
                                 }
 
                                 else -> {
-                                    APApplication.uninstallApatch()
+                                    scope.launch {
+                                        val success = withContext(Dispatchers.IO) {
+                                            APApplication.uninstallApatch()
+                                        }
+                                        if (!success) onOperationFailed()
+                                    }
                                 }
                             }
                         }, content = {
@@ -639,7 +662,7 @@ private fun AStatusCard(apState: APApplication.State) {
                                     Text(text = stringResource(id = R.string.home_ap_cando_update))
                                 }
 
-                                APApplication.State.ANDROIDPATCH_UNINSTALLING -> {
+                                APApplication.State.ANDROIDPATCH_INSTALLING, APApplication.State.ANDROIDPATCH_UNINSTALLING -> {
                                     Icon(Icons.Outlined.Cached, contentDescription = "busy")
                                 }
 

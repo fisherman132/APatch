@@ -3,6 +3,44 @@
     <string name="app_name" translatable="false">APatch</string>
 
     <string name="home">Home</string>
+    <string name="device_profiles">Device Profiles</string>
+    <string name="device_profiles_search">Search user 0 apps</string>
+    <string name="profile_app_list_empty">No user 0 apps found</string>
+    <string name="profile_refresh">Refresh</string>
+    <string name="profile_status">Status</string>
+    <string name="profile_configured">Profile controller configured</string>
+    <string name="profile_not_configured">No profile slots configured for this app</string>
+    <string name="profile_active_slot_value">Active slot: %1$s</string>
+    <string name="profile_generation_value">Generation: %1$d</string>
+    <string name="profile_none">None</string>
+    <string name="profile_slots">Slots</string>
+    <string name="profile_no_slots">No profile slots yet. Create the first slot to capture the app’s current data.</string>
+    <string name="profile_active">Active</string>
+    <string name="profile_stored">Stored</string>
+    <string name="profile_create_slot">Create slot</string>
+    <string name="profile_slot_name">Slot name</string>
+    <string name="profile_invalid_slot_name">Use 1–64 letters, numbers, dots, underscores, or hyphens; start with a letter or number.</string>
+    <string name="profile_capture_current">Capture current app data</string>
+    <string name="profile_capture_first_hint">Required for the first slot.</string>
+    <string name="profile_capture_later_hint">New slots after the first start clean.</string>
+    <string name="profile_create">Create</string>
+    <string name="profile_save_active">Save active</string>
+    <string name="profile_stop_active">Stop active</string>
+    <string name="profile_switch">Switch to slot</string>
+    <string name="profile_delete">Delete</string>
+    <string name="profile_delete_title">Delete profile slot?</string>
+    <string name="profile_delete_message">Delete slot “%1$s”? If it is active, it will be stopped first.</string>
+    <string name="profile_cancel">Cancel</string>
+    <string name="profile_created">Profile slot created</string>
+    <string name="profile_saved">Active profile saved</string>
+    <string name="profile_switched">Profile switched</string>
+    <string name="profile_stopped">Active profile stopped</string>
+    <string name="profile_deleted">Profile slot deleted</string>
+    <string name="profile_operation_failed">Profile operation failed: %1$s</string>
+    <string name="profile_unavailable">Device profiles unavailable</string>
+    <string name="profile_controller_required">Install and enable the KSH profile controller module, then refresh this page.</string>
+    <string name="profile_first_slot_required">No profile slots configured</string>
+    <string name="profile_first_slot_hint">Create the first slot to capture the app’s current data and enable profile switching.</string>
 
     <string name="search">Search</string>
     <string name="search_apps">Search Apps</string>
@@ -80,6 +118,7 @@
     <string name="home_ap_cando_update">Update</string>
     <string name="home_ap_cando_uninstall">Uninstall</string>
     <string name="home_ap_cando_reboot">Reboot</string>
+    <string name="apatch_operation_failed">AndroidPatch operation failed</string>
 
     <string name="patch_title">Patch</string>
 
@@ -143,6 +182,13 @@
     <string name="kpm_unload">Unload</string>
     <string name="kpm_control">Control</string>
     <string name="kpm_apm_empty">No module loaded</string>
+    <string name="kpm_manual_load_notice">ksh-core is loaded from the patched boot image at pre-kernel-init. Load only product KPMs here; they are not restored after a reboot.</string>
+    <string name="kpm_profile_reconciled">KPM stack loaded and active profile state restored</string>
+    <string name="kpm_profile_reconcile_failed">KPMs loaded, but active profile state could not be restored</string>
+    <string name="kpm_load_core_required">Load ksh-core before device-profile</string>
+    <string name="kpm_inspection_failed">The selected KPM could not be inspected</string>
+    <string name="kpm_load_core_unsafe">ksh-core was not activated at pre-kernel-init; patch the boot image and reboot</string>
+    <string name="kpm_load_core_reboot_required">ksh-core must be embedded at pre-kernel-init; patch the boot image and reboot</string>
     <string name="kpm_version">Version</string>
     <string name="kpm_license">License</string>
     <string name="kpm_author">Author</string>

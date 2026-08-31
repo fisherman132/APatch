@@ -5,6 +5,25 @@ use std::path::Path;
 use std::process::Command;
 
 fn get_git_version() -> Result<(u32, String), std::io::Error> {
+    if let Ok(override_code) = env::var("APATCH_VERSION_CODE_OVERRIDE") {
+        let version_code: u32 = override_code.trim().parse().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Other, "Failed to parse version override")
+        })?;
+        let version_name = String::from_utf8(
+            Command::new("git")
+                .args(["describe", "--tags", "--always"])
+                .output()?
+                .stdout,
+        )
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to read git describe stdout",
+            )
+        })?;
+        return Ok((version_code, version_name.trim_start_matches('v').to_string()));
+    }
+
     let output = Command::new("git")
         .args(["rev-list", "--count", "HEAD"])
         .output()?;
@@ -37,6 +56,7 @@ fn main() {
     // update VersionCode when git repository change
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/refs/");
+    println!("cargo:rerun-if-env-changed=APATCH_VERSION_CODE_OVERRIDE");
 
     let (code, name) = match get_git_version() {
         Ok((code, name)) => (code, name),

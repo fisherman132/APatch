@@ -71,7 +71,9 @@ object Version {
                     kpimg["compile_time"].toString(),
                     kpimg["config"].toString(),
                     APApplication.superKey,     // current key
-                    kpimg["root_superkey"].toString()      // possibly empty
+                    kpimg["root_superkey"].toString().let { value ->
+                        if (value == "<configured>" || value == "<unset>") "" else value
+                    }
                 )
                 return kpimg["compile_time"].toString()
             } 
@@ -125,6 +127,15 @@ object Version {
     }
 
     private fun installedApdVString(): String {
+        val restricted = APApplication.runRestrictedAndroidPatch("status")
+        if (restricted.success) {
+            installedApdVString = Regex("version=(\\d+)")
+                .find(restricted.output)
+                ?.groupValues
+                ?.get(1)
+                ?: "0"
+            return installedApdVString
+        }
         val resultShell = rootShellForResult("${APApplication.APD_PATH} -V")
         installedApdVString = if (resultShell.isSuccess) {
             val result = resultShell.out.toString()

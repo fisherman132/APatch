@@ -246,28 +246,6 @@ fun Patches(mode: PatchesViewModel.PatchMode) {
                 })
             }
 
-            // add new extras
-            if (mode != PatchesViewModel.PatchMode.UNPATCH) {
-                viewModel.newExtras.forEach(action = {
-                    ExtraItem(extra = it, false, onDelete = {
-                        val idx = viewModel.newExtras.indexOf(it)
-                        viewModel.newExtras.remove(it)
-                        viewModel.newExtrasFileName.removeAt(idx)
-                    })
-                })
-            }
-
-            // add new KPM
-            if (!viewModel.patching && !viewModel.patchdone && mode != PatchesViewModel.PatchMode.UNPATCH) {
-                SelectFileButton(
-                    text = stringResource(id = R.string.patch_embed_kpm_btn),
-                    onSelected = { data, uri ->
-                        Log.d(TAG, "select kpm, data: $data, uri: $uri")
-                        viewModel.embedKPM(uri)
-                    }
-                )
-            }
-
             // do patch, update, unpatch
             if (!viewModel.patching && !viewModel.patchdone) {
                 // patch start

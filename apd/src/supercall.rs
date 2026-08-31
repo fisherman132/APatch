@@ -20,6 +20,8 @@ const KSTORAGE_EXCLUDE_LIST_GROUP: i32 = 1;
 const __NR_SUPERCALL: c_long = 45;
 const SUPERCALL_SU: c_long = 0x1010;
 const SUPERCALL_KSTORAGE_WRITE: c_long = 0x1041;
+const SUPERCALL_PROFILE_KPM_CONTROL: c_long = 0x1047;
+const SUPERCALL_KSH_CORE_CONTROL: c_long = 0x104b;
 const SUPERCALL_SU_GRANT_UID: c_long = 0x1100;
 const SUPERCALL_SU_REVOKE_UID: c_long = 0x1101;
 const SUPERCALL_SU_NUMS: c_long = 0x1102;
@@ -28,7 +30,6 @@ const SUPERCALL_SU_RESET_PATH: c_long = 0x1111;
 const SUPERCALL_SU_GET_SAFEMODE: c_long = 0x1112;
 
 const SUPERCALL_SCONTEXT_LEN: usize = 0x60;
-
 #[repr(C)]
 struct SuProfile {
     uid: i32,
@@ -39,6 +40,36 @@ struct SuProfile {
 fn ver_and_cmd(cmd: c_long) -> c_long {
     let version_code: u32 = ((MAJOR << 16) + (MINOR << 8) + PATCH).try_into().unwrap();
     ((version_code as c_long) << 32) | (0x1158 << 16) | (cmd & 0xFFFF)
+}
+
+pub fn profile_kpm_control(command: &str) -> anyhow::Result<String> {
+    const OUTPUT_CAPACITY: usize = 4096;
+    let command =
+        CString::new(command).map_err(|_| anyhow::anyhow!("profile command contains NUL"))?;
+    let mut output = vec![0u8; OUTPUT_CAPACITY];
+    let supercall_command = if command.to_bytes().starts_with(b"ksh ") {
+        SUPERCALL_KSH_CORE_CONTROL
+    } else {
+        SUPERCALL_PROFILE_KPM_CONTROL
+    };
+    let rc = unsafe {
+        syscall(
+            __NR_SUPERCALL,
+            std::ptr::null::<libc::c_char>(),
+            ver_and_cmd(supercall_command),
+            command.as_ptr(),
+            output.as_mut_ptr(),
+            output.len() as c_long,
+        ) as c_long
+    };
+    if rc < 0 {
+        anyhow::bail!("profile control failed: errno {}", -rc);
+    }
+    let length = output
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(output.len());
+    Ok(String::from_utf8_lossy(&output[..length]).into_owned())
 }
 
 fn sc_su_revoke_uid(key: &CStr, uid: uid_t) -> c_long {

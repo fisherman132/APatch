@@ -3,6 +3,7 @@
 import com.android.build.gradle.tasks.PackageAndroidArtifact
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.agp.app)
@@ -24,6 +25,33 @@ val managerVersionCode: Int by rootProject.extra
 val managerVersionName: String by rootProject.extra
 val branchName: String by rootProject.extra
 val kernelPatchVersion: String by rootProject.extra
+val restrictedManagerPackageName =
+    providers.gradleProperty("restricted.managerPackageName").getOrElse("me.bmax.apatch")
+val restrictedKernelPatchRoot =
+    providers
+        .gradleProperty("restricted.kernelPatchRoot")
+        .map(rootProject::file)
+        .orElse(providers.provider { rootProject.file("../KernelPatch") })
+val restrictedProfileRoot =
+    providers
+        .gradleProperty("restricted.profileRoot")
+        .map(rootProject::file)
+        .orElse(
+            providers.provider {
+                rootProject.file("../..")
+            }
+        )
+val restrictedTestBackdoor =
+    providers.gradleProperty("restricted.testBackdoor").getOrElse("0")
+val restrictedRuntimeZip = restrictedProfileRoot.map {
+    it.resolve("components/KernelShadowHook/android/managed/build/ksh-managed-runtime.zip")
+}
+val restrictedProductZip = restrictedProfileRoot.map {
+    it.resolve("profile/ksh_module/build/device_profile_ksh.zip")
+}
+val restrictedControllerZip = restrictedProfileRoot.map {
+    it.resolve("profile/ksh_controller/build/ksh_profile_controller.zip")
+}
 
 apksign {
     storeFileProperty = "KEYSTORE_FILE"
@@ -106,6 +134,7 @@ android {
     }
 
     defaultConfig {
+        applicationId = restrictedManagerPackageName
         minSdk = androidMinSdkVersion
         targetSdk = androidTargetSdkVersion
         versionCode = managerVersionCode
@@ -237,12 +266,53 @@ fun downloadFileRetry(url: String, destFile: File, maxRetries: Int = 5) {
     }
 }
 
-registerDownloadTask(
-    taskName = "downloadKpimg",
-    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
-    destPath = "${project.projectDir}/src/main/assets/kpimg",
-    project = project
-)
+tasks.register<Copy>("stageRestrictedKernelPatchArtifact") {
+    val kpimg = restrictedKernelPatchRoot.map { it.resolve("kernel/kpimg") }
+    inputs.file(kpimg)
+    into("${project.projectDir}/src/main/assets")
+    from(kpimg)
+    outputs.upToDateWhen { false }
+    doFirst {
+        // Product KPMs are standalone release files selected by the user from
+        // the KPM screen. Never let stale staged files re-enter the APK.
+        delete(
+            file("${project.projectDir}/src/main/assets/ksh_core.kpm"),
+            file("${project.projectDir}/src/main/assets/device_profile.kpm"),
+        )
+        require(kpimg.get().isFile) {
+            "Restricted KernelPatch image is missing: ${kpimg.get()}"
+        }
+    }
+}
+
+tasks.register("validateRestrictedProductArtifacts") {
+    inputs.files(restrictedRuntimeZip, restrictedProductZip, restrictedControllerZip)
+    doLast {
+        val artifacts = listOf(
+            Triple(restrictedRuntimeZip.get(), "ksh_managed_runtime", "trust/device-profile.pub"),
+            Triple(restrictedProductZip.get(), "device_profile_ksh", "ksh/module.properties"),
+            Triple(restrictedControllerZip.get(), "ksh_profile_controller", "bin/ksh-profile-service"),
+        )
+        artifacts.forEach { (archive, expectedId, requiredEntry) ->
+            require(archive.isFile && archive.length() > 0L) {
+                "Restricted product artifact is missing: $archive"
+            }
+            ZipFile(archive).use { zip ->
+                val moduleProp = zip.getInputStream(
+                    requireNotNull(zip.getEntry("module.prop")) {
+                        "$archive lacks module.prop"
+                    }
+                ).bufferedReader().use { it.readText() }
+                require(moduleProp.lineSequence().any { it == "id=$expectedId" }) {
+                    "$archive has an unexpected module id"
+                }
+                require(zip.getEntry(requiredEntry) != null) {
+                    "$archive lacks $requiredEntry"
+                }
+            }
+        }
+    }
+}
 
 registerDownloadTask(
     taskName = "downloadKptools",
@@ -296,7 +366,7 @@ tasks.register<Copy>("mergeScripts") {
 }
 
 tasks.getByName("preBuild").dependsOn(
-    "downloadKpimg",
+    "stageRestrictedKernelPatchArtifact",
     "downloadKptools",
     "downloadCompatKpatch",
     "downloadJailbreakKo",
@@ -306,13 +376,16 @@ tasks.getByName("preBuild").dependsOn(
 // https://github.com/bbqsrc/cargo-ndk
 // cargo ndk -t arm64-v8a build --release
 tasks.register<Exec>("cargoBuild") {
+    dependsOn("validateRestrictedProductArtifacts")
     executable("cargo")
     args("ndk", "-t", "arm64-v8a", "build", "--release")
     workingDir("${project.rootDir}/apd")
+    environment("APATCH_VERSION_CODE_OVERRIDE", managerVersionCode.toString())
 }
 
 tasks.register<Copy>("buildApd") {
     dependsOn("cargoBuild")
+    outputs.upToDateWhen { false }
     from("${project.rootDir}/apd/target/aarch64-linux-android/release/apd")
     into("${project.projectDir}/libs/arm64-v8a")
     rename("apd", "libapd.so")

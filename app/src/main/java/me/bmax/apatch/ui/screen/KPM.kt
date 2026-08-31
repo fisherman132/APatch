@@ -72,7 +72,6 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
-import com.ramcosta.composedestinations.generated.destinations.InstallScreenDestination
 import com.ramcosta.composedestinations.generated.destinations.PatchesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import com.topjohnwu.superuser.nio.ExtendedFile
@@ -96,11 +95,20 @@ import me.bmax.apatch.ui.viewmodel.KPModel
 import me.bmax.apatch.ui.viewmodel.KPModuleViewModel
 import me.bmax.apatch.ui.viewmodel.PatchesViewModel
 import me.bmax.apatch.util.inputStream
+import me.bmax.apatch.util.DeviceProfileController
 import me.bmax.apatch.util.ui.APDialogBlurBehindUtils
+import me.bmax.apatch.util.rootShellForResult
 import me.bmax.apatch.util.writeTo
+import java.io.File
 import java.io.IOException
 
 private const val TAG = "KernelPatchModule"
+private const val KSH_CORE_MODULE = "ksh-core"
+private const val DEVICE_PROFILE_MODULE = "device-profile"
+private const val KPM_LOAD_CORE_REQUIRED = -10_001
+private const val KPM_LOAD_INSPECTION_FAILED = -10_002
+private const val KPM_LOAD_CORE_UNSAFE = -10_003
+private const val KPM_LOAD_CORE_REBOOT_REQUIRED = -10_004
 private lateinit var targetKPMToControl: KPModel.KPMInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,7 +116,8 @@ private lateinit var targetKPMToControl: KPModel.KPMInfo
 @Composable
 fun KPModuleScreen(navigator: DestinationsNavigator) {
     val state by APApplication.apStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
-    if (state == APApplication.State.UNKNOWN_STATE) {
+    if (state == APApplication.State.UNKNOWN_STATE &&
+        !Natives.nativeRestrictedKpmReady()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -154,20 +163,6 @@ fun KPModuleScreen(navigator: DestinationsNavigator) {
             val failToastText = stringResource(id = R.string.kpm_load_toast_failed)
             val loadingDialog = rememberLoadingDialog()
 
-            val selectZipLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.StartActivityForResult()
-            ) {
-                if (it.resultCode != RESULT_OK) {
-                    return@rememberLauncherForActivityResult
-                }
-                val data = it.data ?: return@rememberLauncherForActivityResult
-                val uri = data.data ?: return@rememberLauncherForActivityResult
-
-                Log.i(TAG, "select zip result: $uri")
-
-                navigator.navigate(InstallScreenDestination(uri, MODULE_TYPE.KPM))
-            }
-
             val selectKpmLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) {
@@ -180,7 +175,25 @@ fun KPModuleScreen(navigator: DestinationsNavigator) {
                 // todo: args
                 scope.launch {
                     val rc = loadModule(loadingDialog, uri, "")
-                    val toastText = if (rc == 0) successToastText else "$failToastText: $rc"
+                    val profileStack = if (rc == 0) {
+                        reconcileManualProfileStackIfReady()
+                    } else {
+                        null
+                    }
+                    val toastText = when {
+                        rc == KPM_LOAD_CORE_REQUIRED ->
+                            context.getString(R.string.kpm_load_core_required)
+                        rc == KPM_LOAD_INSPECTION_FAILED ->
+                            context.getString(R.string.kpm_inspection_failed)
+                        rc == KPM_LOAD_CORE_UNSAFE ->
+                            context.getString(R.string.kpm_load_core_unsafe)
+                        rc == KPM_LOAD_CORE_REBOOT_REQUIRED ->
+                            context.getString(R.string.kpm_load_core_reboot_required)
+                        rc != 0 -> "$failToastText: $rc"
+                        profileStack == false -> context.getString(R.string.kpm_profile_reconcile_failed)
+                        profileStack == true -> context.getString(R.string.kpm_profile_reconciled)
+                        else -> successToastText
+                    }
                     withContext(Dispatchers.Main) {
                         Toast.makeText(
                             context, toastText, Toast.LENGTH_SHORT
@@ -223,14 +236,9 @@ fun KPModuleScreen(navigator: DestinationsNavigator) {
                                     }
 
                                     moduleInstall -> {
-//                                        val intent = Intent(Intent.ACTION_GET_CONTENT)
-//                                        intent.type = "application/zip"
-//                                        selectZipLauncher.launch(intent)
-                                        Toast.makeText(
-                                            context,
-                                            "Under development",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        val intent = Intent(Intent.ACTION_GET_CONTENT)
+                                        intent.type = "*/*"
+                                        selectKpmLauncher.launch(intent)
                                     }
 
                                     moduleLoad -> {
@@ -258,6 +266,42 @@ fun KPModuleScreen(navigator: DestinationsNavigator) {
     }
 }
 
+private suspend fun reconcileManualProfileStackIfReady(): Boolean? =
+    withContext(Dispatchers.IO) {
+        val loaded = Natives.kernelPatchModuleList()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        if (!loaded.containsAll(setOf(KSH_CORE_MODULE, DEVICE_PROFILE_MODULE))) {
+            return@withContext null
+        }
+        isPreZygoteKshCore() && runCatching {
+            val backend = Natives.kernelPatchModuleControl(
+                DEVICE_PROFILE_MODULE,
+                "backend_status",
+            )
+            check(backend.rc >= 0L)
+            val profile = Natives.kernelPatchModuleControl(
+                DEVICE_PROFILE_MODULE,
+                "ksh_profile_status",
+            )
+            val providerRegistered = profile.outMsg.orEmpty()
+                .lineSequence()
+                .any { it == "provider_registered=1" }
+            check(profile.rc >= 0L && providerRegistered)
+            DeviceProfileController().reconcile()
+        }.isSuccess
+    }
+
+private fun isPreZygoteKshCore(): Boolean {
+    val status = Natives.kernelPatchModuleControl(KSH_CORE_MODULE, "ksh runtime-status")
+    val lines = status.outMsg.orEmpty().lineSequence().toSet()
+    return status.rc >= 0L && "runtime=active" in lines
+            && "route_mask=63" in lines
+            && "load_event=pre-kernel-init" in lines
+}
+
 suspend fun loadModule(loadingDialog: LoadingDialogHandle, uri: Uri, args: String): Int {
     val rc = loadingDialog.withLoading {
         withContext(Dispatchers.IO) {
@@ -272,7 +316,25 @@ suspend fun loadModule(loadingDialog: LoadingDialogHandle, uri: Uri, args: Strin
                 var rc = -1
                 try {
                     uri.inputStream().buffered().writeTo(kpm)
-                    rc = Natives.loadKernelPatchModule(kpm.path, args).toInt()
+                    val moduleName = inspectKpmName(kpm.path)
+                    val loaded = Natives.kernelPatchModuleList()
+                        .lineSequence()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .toSet()
+                    rc = if (moduleName == null) {
+                        KPM_LOAD_INSPECTION_FAILED
+                    } else if (moduleName == KSH_CORE_MODULE) {
+                        KPM_LOAD_CORE_REBOOT_REQUIRED
+                    } else if (moduleName == DEVICE_PROFILE_MODULE) {
+                        when {
+                            KSH_CORE_MODULE !in loaded -> KPM_LOAD_CORE_REQUIRED
+                            !isPreZygoteKshCore() -> KPM_LOAD_CORE_UNSAFE
+                            else -> Natives.loadKernelPatchModule(kpm.path, args).toInt()
+                        }
+                    } else {
+                        Natives.loadKernelPatchModule(kpm.path, args).toInt()
+                    }
                 } catch (e: IOException) {
                     Log.e(TAG, "Copy kpm error: $e")
                 }
@@ -282,6 +344,19 @@ suspend fun loadModule(loadingDialog: LoadingDialogHandle, uri: Uri, args: Strin
         }
     }
     return rc
+}
+
+private fun inspectKpmName(path: String): String? {
+    val executable = File(apApp.applicationInfo.nativeLibraryDir, "libkptools.so")
+    return runCatching {
+        val result = rootShellForResult("${executable.path} -l -M $path")
+        if (!result.isSuccess) return@runCatching null
+        result.out.asSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("name=") }
+            ?.removePrefix("name=")
+            ?.takeIf(String::isNotEmpty)
+    }.getOrNull()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -461,6 +536,18 @@ private fun KPModuleList(
                 )
             },
         ) {
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.kpm_manual_load_notice),
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             when {
                 modules.isEmpty() -> {
                     item {
@@ -509,6 +596,8 @@ private fun KPModuleItem(
     val moduleAuthor = stringResource(id = R.string.kpm_author)
     val moduleArgs = stringResource(id = R.string.kpm_args)
     val decoration = TextDecoration.None
+    val canUnload = module.name != KSH_CORE_MODULE &&
+        module.name != DEVICE_PROFILE_MODULE
 
     Surface(
         modifier = modifier,
@@ -596,7 +685,7 @@ private fun KPModuleItem(
 
                     Spacer(modifier = Modifier.width(12.dp))
 
-                    KPModuleRemoveButton(enabled = true, onClick = { onUninstall(module) })
+                    KPModuleRemoveButton(enabled = canUnload, onClick = { onUninstall(module) })
                 }
             }
 
