@@ -33,6 +33,10 @@
     <string name="profile_switched">身份已切换</string>
     <string name="profile_stopped">活动身份已停止</string>
     <string name="profile_deleted">应用分身已删除</string>
+    <string name="profile_bind">绑定画像</string>
+    <string name="profile_select_production">选择生产画像</string>
+    <string name="profile_bound_value">生产画像：%1$s</string>
+    <string name="profile_bound">生产画像已绑定</string>
     <string name="profile_operation_failed">身份操作失败：%1$s</string>
     <string name="profile_unavailable">改机分身功能不可用</string>
     <string name="profile_controller_required">请安装并启用 KSH 画像控制器模块，然后刷新此页面。</string>

@@ -146,6 +146,14 @@ class DeviceProfileViewModel(
             controller.delete(packageName, slotName)
         }
 
+    suspend fun bindProfile(
+        packageName: String,
+        slotName: String,
+        profileId: String,
+    ): Result<Unit> = mutate(packageName) {
+        controller.bindProfile(packageName, slotName, profileId)
+    }
+
     private suspend fun mutate(
         packageName: String,
         action: suspend () -> Unit,

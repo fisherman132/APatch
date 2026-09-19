@@ -31,11 +31,15 @@ object Version {
         return vi.toUInt()
     }
 
+    @Synchronized
     fun getKpImg(): String {
         var shell: Shell = createRootShell()
         var kimgInfo = mutableStateOf(KPModel.KImgInfo("", false))
         var kpimgInfo = mutableStateOf(KPModel.KPImgInfo("", "", "", "", ""))
-        val patchDir: ExtendedFile = FileSystemManager.getLocal().getFile(apApp.filesDir.parent, "check")
+        val patchDir: ExtendedFile = FileSystemManager.getLocal().getFile(
+            apApp.filesDir.parent,
+            "check-${android.os.Process.myPid()}",
+        )
         patchDir.deleteRecursively()
         patchDir.mkdirs()
         val execs = listOf(
@@ -49,7 +53,9 @@ object Version {
 
         for (lib in libs) {
             val name = lib.name.substring(3, lib.name.length - 3)
-            Os.symlink(lib.path, "$patchDir/$name")
+            val link = "$patchDir/$name"
+            File(link).delete()
+            Os.symlink(lib.path, link)
         }
 
         for (script in listOf(

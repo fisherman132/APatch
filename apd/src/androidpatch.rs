@@ -34,6 +34,8 @@ const KSH_PROFILE_ZIP: &[u8] =
     include_bytes!("../../../../profile/ksh_module/build/device_profile_ksh.zip");
 const KSH_CONTROLLER_ZIP: &[u8] =
     include_bytes!("../../../../profile/ksh_controller/build/ksh_profile_controller.zip");
+const KSH_DEVICE_PROFILES_ZIP: &[u8] =
+    include_bytes!("../../../../profile/ksh_device_profiles/build/ksh_device_profiles.zip");
 
 struct ProductModule {
     id: &'static str,
@@ -70,6 +72,18 @@ const PRODUCT_MODULES: &[ProductModule] = &[
         archive: KSH_PROFILE_ZIP,
         required_paths: &["module.prop", "ksh/classes.dex", "ksh/module.properties"],
         executable_paths: &[],
+        private_paths: &[],
+    },
+    ProductModule {
+        id: "ksh_device_profiles",
+        archive_name: "ksh-device-profiles.zip",
+        archive: KSH_DEVICE_PROFILES_ZIP,
+        required_paths: &[
+            "module.prop",
+            "profile.index",
+            "bin/ksh-device-profile-data",
+        ],
+        executable_paths: &["service.sh", "bin/ksh-device-profile-data"],
         private_paths: &[],
     },
     ProductModule {
@@ -482,6 +496,12 @@ fn stop_profile_service() {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+    for _ in 0..100 {
+        if !profile_service_running() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

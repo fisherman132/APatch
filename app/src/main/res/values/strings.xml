@@ -36,6 +36,10 @@
     <string name="profile_switched">Profile switched</string>
     <string name="profile_stopped">Active profile stopped</string>
     <string name="profile_deleted">Profile slot deleted</string>
+    <string name="profile_bind">Bind profile</string>
+    <string name="profile_select_production">Select production profile</string>
+    <string name="profile_bound_value">Production profile: %1$s</string>
+    <string name="profile_bound">Production profile bound</string>
     <string name="profile_operation_failed">Profile operation failed: %1$s</string>
     <string name="profile_unavailable">Device profiles unavailable</string>
     <string name="profile_controller_required">Install and enable the KSH profile controller module, then refresh this page.</string>

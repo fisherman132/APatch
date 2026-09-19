@@ -25,16 +25,26 @@ data class DeviceProfileStatus(
     val activeSlot: String?,
     val activeGeneration: Long?,
     val running: Boolean,
+    val activeProfile: String?,
 )
 
 data class DeviceProfileSlot(
     val name: String,
     val active: Boolean,
+    val profileId: String?,
+)
+
+data class ProductionDeviceProfile(
+    val id: String,
+    val maturity: String,
+    val hardwareFamily: String,
+    val runtimeStatus: String,
 )
 
 data class DeviceProfileSnapshot(
     val status: DeviceProfileStatus,
     val slots: List<DeviceProfileSlot>,
+    val profiles: List<ProductionDeviceProfile>,
 )
 
 /** Builds only the fixed profile-service Slot command surface used by the UI. */
@@ -52,6 +62,18 @@ object DeviceProfileCommandFactory {
 
     fun list(packageName: String, userId: Int = PRIMARY_USER_ID): List<String> =
         build("list", packageName(packageName), user(userId), "--json")
+
+    fun profiles(): List<String> = listOf("profiles", "--json")
+
+    fun bindProfile(
+        packageName: String,
+        slotName: String,
+        profileId: String,
+        userId: Int = PRIMARY_USER_ID,
+    ): List<String> = build(
+        "bind-profile", packageName(packageName), user(userId), slotName(slotName),
+        profileId(profileId),
+    )
 
     fun create(
         packageName: String,
@@ -96,6 +118,13 @@ object DeviceProfileCommandFactory {
         return value
     }
 
+    private fun profileId(value: String): String {
+        require(value.matches(Regex("^[a-z][a-z0-9_-]{2,63}$"))) {
+            "Invalid production device profile ID"
+        }
+        return value
+    }
+
     private fun user(value: Int): String {
         require(value == PRIMARY_USER_ID) { "Only Android user 0 is supported" }
         return value.toString()
@@ -108,6 +137,7 @@ object DeviceProfileJsonParser {
     fun parse(
         statusJson: String,
         listJson: String,
+        profilesJson: String,
         expectedPackageName: String,
     ): DeviceProfileSnapshot {
         val statusDocument = parseDocument(statusJson, "status", expectedPackageName)
@@ -115,6 +145,7 @@ object DeviceProfileJsonParser {
         if (statusDocument.configured != listDocument.configured ||
             statusDocument.activeSlot != listDocument.activeSlot ||
             statusDocument.activeGeneration != listDocument.activeGeneration ||
+            statusDocument.activeProfile != listDocument.activeProfile ||
             statusDocument.slots.toSet() != listDocument.slots.toSet()
         ) {
             throw JSONException("Profile status and list responses disagree")
@@ -126,8 +157,10 @@ object DeviceProfileJsonParser {
                 activeSlot = activeSlot,
                 activeGeneration = statusDocument.activeGeneration,
                 running = activeSlot != null,
+                activeProfile = statusDocument.activeProfile,
             ),
             slots = listDocument.slots.sortedBy { it.name.lowercase() },
+            profiles = parseProfiles(profilesJson),
         )
     }
 
@@ -135,6 +168,7 @@ object DeviceProfileJsonParser {
         val configured: Boolean,
         val activeSlot: String?,
         val activeGeneration: Long?,
+        val activeProfile: String?,
         val slots: List<DeviceProfileSlot>,
     )
 
@@ -167,6 +201,7 @@ object DeviceProfileJsonParser {
             throw JSONException("Profile $command response contains an invalid active slot")
         }
         val generation = active?.requiredLong("generation")
+        val activeProfile = active?.optionalString("profile")
         if (generation != null && generation <= 0L) {
             throw JSONException("Profile $command response contains an invalid generation")
         }
@@ -180,7 +215,7 @@ object DeviceProfileJsonParser {
                 if (!DeviceProfileCommandFactory.isValidSlotName(id)) {
                     throw JSONException("Profile $command response contains an invalid slot id")
                 }
-                add(DeviceProfileSlot(id, item.requiredBoolean("active")))
+                add(DeviceProfileSlot(id, item.requiredBoolean("active"), item.optionalString("profile")))
             }
         }
         if (slots.distinctBy { it.name }.size != slots.size) {
@@ -189,14 +224,40 @@ object DeviceProfileJsonParser {
         val activeSlots = slots.filter { it.active }
         if (activeSlots.size > 1 ||
             (activeSlot == null && activeSlots.isNotEmpty()) ||
-            (activeSlot != null && activeSlots.singleOrNull()?.name != activeSlot)
+            (activeSlot != null && activeSlots.singleOrNull()?.name != activeSlot) ||
+            (activeSlot != null && activeSlots.singleOrNull()?.profileId != activeProfile)
         ) {
             throw JSONException("Profile $command response has inconsistent active state")
         }
         if (!configured && (activeSlot != null || slots.isNotEmpty())) {
             throw JSONException("Unconfigured profile response contains slot state")
         }
-        return ProfileDocument(configured, activeSlot, generation, slots)
+        return ProfileDocument(configured, activeSlot, generation, activeProfile, slots)
+    }
+
+    private fun parseProfiles(json: String): List<ProductionDeviceProfile> {
+        val root = JSONObject(json.trim())
+        if (!root.requiredBoolean("ok")) throw JSONException("Profile catalog has ok=false")
+        val values = root.opt("profiles") as? JSONArray
+            ?: throw JSONException("Profile catalog profiles must be an array")
+        return buildList {
+            for (index in 0 until values.length()) {
+                val item = values.opt(index) as? JSONObject
+                    ?: throw JSONException("Profile catalog entry must be an object")
+                add(
+                    ProductionDeviceProfile(
+                        item.requiredString("id"),
+                        item.requiredString("maturity"),
+                        item.requiredString("hardwareFamily"),
+                        item.requiredString("runtimeStatus"),
+                    )
+                )
+            }
+        }.also { profiles ->
+            if (profiles.distinctBy { it.id }.size != profiles.size) {
+                throw JSONException("Profile catalog contains duplicate IDs")
+            }
+        }
     }
 
     private fun JSONObject.requiredBoolean(key: String): Boolean =
@@ -206,6 +267,14 @@ object DeviceProfileJsonParser {
     private fun JSONObject.requiredString(key: String): String =
         (opt(key) as? String)?.takeIf { it.isNotEmpty() }
             ?: throw JSONException("Profile response field $key must be a non-empty string")
+
+    private fun JSONObject.optionalString(key: String): String? =
+        when (val value = opt(key)) {
+            null, JSONObject.NULL -> null
+            is String -> value.takeIf { it.matches(Regex("^[a-z][a-z0-9_-]{2,63}$")) }
+                ?: throw JSONException("Profile response field $key is invalid")
+            else -> throw JSONException("Profile response field $key must be a string or null")
+        }
 
     private fun JSONObject.requiredLong(key: String): Long {
         return when (val value = opt(key)) {
@@ -223,7 +292,8 @@ class DeviceProfileController {
         brokerMutex.withLock {
             val status = execute(DeviceProfileCommandFactory.status(packageName))
             val slots = execute(DeviceProfileCommandFactory.list(packageName))
-            DeviceProfileJsonParser.parse(status, slots, packageName)
+            val profiles = execute(DeviceProfileCommandFactory.profiles())
+            DeviceProfileJsonParser.parse(status, slots, profiles, packageName)
         }
     }
 
@@ -239,6 +309,9 @@ class DeviceProfileController {
 
     suspend fun delete(packageName: String, slotName: String) =
         mutate(DeviceProfileCommandFactory.delete(packageName, slotName))
+
+    suspend fun bindProfile(packageName: String, slotName: String, profileId: String) =
+        mutate(DeviceProfileCommandFactory.bindProfile(packageName, slotName, profileId))
 
     suspend fun reconcile() = withContext(Dispatchers.IO) {
         brokerMutex.withLock {
@@ -259,7 +332,7 @@ class DeviceProfileController {
         command: List<String>,
         timeoutMillis: Long = BROKER_TIMEOUT_MILLIS,
     ): String {
-        require(command.size == 1 || command.size in 3..5) {
+        require(command.size in 1..5) {
             "invalid broker command size"
         }
         val context = apApp.createDeviceProtectedStorageContext()

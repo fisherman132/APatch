@@ -169,6 +169,7 @@ fun DeviceProfileDetailScreen(
     val configuredMutationsAllowed = backendAvailable && snapshot.status.configured
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<DeviceProfileSlot?>(null) }
+    var pendingProfileSlot by remember { mutableStateOf<DeviceProfileSlot?>(null) }
     var navigationPending by remember { mutableStateOf(false) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -181,6 +182,7 @@ fun DeviceProfileDetailScreen(
     val switchedMessage = stringResource(R.string.profile_switched)
     val stoppedMessage = stringResource(R.string.profile_stopped)
     val deletedMessage = stringResource(R.string.profile_deleted)
+    val boundMessage = stringResource(R.string.profile_bound)
 
     suspend fun announce(result: Result<Unit>, successMessage: String) {
         val message = result.fold(
@@ -411,16 +413,31 @@ fun DeviceProfileDetailScreen(
                         ListItem(
                             headlineContent = { Text(slot.name) },
                             supportingContent = {
-                                Text(
-                                    if (slot.active) {
-                                        stringResource(R.string.profile_active)
-                                    } else {
-                                        stringResource(R.string.profile_stored)
-                                    }
-                                )
+                                Column {
+                                    Text(
+                                        if (slot.active) {
+                                            stringResource(R.string.profile_active)
+                                        } else {
+                                            stringResource(R.string.profile_stored)
+                                        }
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.profile_bound_value,
+                                            slot.profileId ?: stringResource(R.string.profile_none),
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
                             },
                             trailingContent = {
                                 Row {
+                                    TextButton(
+                                        enabled = configuredMutationsAllowed && !busy && !slot.active && current.profiles.isNotEmpty(),
+                                        onClick = { pendingProfileSlot = slot },
+                                    ) {
+                                        Text(stringResource(R.string.profile_bind))
+                                    }
                                     IconButton(
                                         enabled = configuredMutationsAllowed && !busy && !slot.active,
                                         onClick = {
@@ -495,6 +512,46 @@ fun DeviceProfileDetailScreen(
                     enabled = !busy,
                     onClick = { pendingDelete = null },
                 ) {
+                    Text(stringResource(R.string.profile_cancel))
+                }
+            },
+        )
+    }
+
+    pendingProfileSlot?.let { slot ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) pendingProfileSlot = null },
+            title = { Text(stringResource(R.string.profile_select_production)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    snapshot?.profiles?.forEach { profile ->
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    val result = profileViewModel.bindProfile(
+                                        packageName, slot.name, profile.id,
+                                    )
+                                    if (result.isSuccess) pendingProfileSlot = null
+                                    announce(result, boundMessage)
+                                }
+                            },
+                        ) {
+                            Column(horizontalAlignment = Alignment.Start) {
+                                Text(profile.id)
+                                Text(
+                                    "${profile.hardwareFamily} · ${profile.runtimeStatus}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = { pendingProfileSlot = null }) {
                     Text(stringResource(R.string.profile_cancel))
                 }
             },

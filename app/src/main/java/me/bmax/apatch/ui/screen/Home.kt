@@ -78,6 +78,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.AboutScreenDestination
 import com.ramcosta.composedestinations.generated.destinations.InstallModeSelectScreenDestination
+import com.ramcosta.composedestinations.generated.destinations.KPModuleScreenDestination
 import com.ramcosta.composedestinations.generated.destinations.PatchesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.Dispatchers
@@ -325,8 +326,12 @@ private fun KStatusCard(
 
     ElevatedCard(
         onClick = {
-            if (!isJailbreak && kpState != APApplication.State.KERNELPATCH_INSTALLED) {
-                navigator.navigate(InstallModeSelectScreenDestination)
+            if (!isJailbreak) {
+                if (kpState == APApplication.State.KERNELPATCH_INSTALLED) {
+                    navigator.navigate(KPModuleScreenDestination)
+                } else {
+                    navigator.navigate(InstallModeSelectScreenDestination)
+                }
             }
         },
         colors = CardDefaults.elevatedCardColors(containerColor = cardBackgroundColor),

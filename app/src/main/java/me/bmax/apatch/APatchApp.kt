@@ -495,6 +495,10 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
         // TODO: We can't totally protect superkey from be stolen by root or LSPosed-like injection tools in user space, the only way is don't use superkey,
         // TODO: 1. make me root by kernel
         // TODO: 2. remove all usage of superkey
+        // Create the device-protected mailbox while this thread still has the
+        // Manager app UID.  The root initialization worker must never be the
+        // first creator of the app-private files directory.
+        createDeviceProtectedStorageContext().filesDir
         sharedPreferences = getSharedPreferences(SP_NAME, Context.MODE_PRIVATE)
         superKey = resolveSuperKey()
 
