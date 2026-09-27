@@ -332,7 +332,7 @@ class DeviceProfileController {
         command: List<String>,
         timeoutMillis: Long = BROKER_TIMEOUT_MILLIS,
     ): String {
-        require(command.size in 1..5) {
+        require(command.size in 1..11) {
             "invalid broker command size"
         }
         val context = apApp.createDeviceProtectedStorageContext()
