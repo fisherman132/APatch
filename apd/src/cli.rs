@@ -108,6 +108,9 @@ enum AndroidPatchAction {
         source_dir: PathBuf,
     },
     Uninstall,
+    InstallModules,
+    InstallProfileData,
+    InstallProfileModuleLive,
     Status,
 }
 
@@ -419,6 +422,11 @@ pub fn run() -> Result<()> {
                 androidpatch::install(Some(source_dir.as_path()))
             }
             AndroidPatchAction::Uninstall => androidpatch::uninstall(),
+            AndroidPatchAction::InstallModules => androidpatch::install_modules(),
+            AndroidPatchAction::InstallProfileData => androidpatch::install_profile_data(),
+            AndroidPatchAction::InstallProfileModuleLive => {
+                androidpatch::install_profile_module_live()
+            }
             AndroidPatchAction::Status => androidpatch::status(),
         },
     };

@@ -82,8 +82,6 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
 
         const val SP_NAME = "config"
         private const val SHOW_BACKUP_WARN = "show_backup_warning"
-        private const val AUTO_PRODUCT_SCHEMA_KEY = "auto_product_schema"
-        private const val AUTO_PRODUCT_SCHEMA = 2
         lateinit var sharedPreferences: SharedPreferences
 
         private val logCallback: CallbackList<String?> = object : CallbackList<String?>() {
@@ -105,8 +103,29 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
         )
 
         fun runRestrictedAndroidPatch(action: String): AndroidPatchCommandResult {
-            require(action == "install" || action == "uninstall" || action == "status")
+            require(action == "install" || action == "uninstall" ||
+                action == "status" || action == "install-modules")
             return runCatching {
+                if (action == "install-modules") {
+                    if (Natives.androidPatchAction(0) <= 0L) {
+                        return AndroidPatchCommandResult(
+                            false, "AndroidPatch base is not installed")
+                    }
+                    val process = ProcessBuilder(
+                        "/system/bin/linker64", APD_PATH,
+                        "internal-androidpatch", "install-modules",
+                    ).redirectErrorStream(true).start()
+                    if (!process.waitFor(180, TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                        return AndroidPatchCommandResult(
+                            false, "Production module installation timed out")
+                    }
+                    val output = process.inputStream.bufferedReader().use {
+                        it.readText()
+                    }.trim()
+                    return AndroidPatchCommandResult(
+                        process.exitValue() == 0, output)
+                }
                 val actionCode = when (action) {
                     "status" -> 0
                     "install" -> 1
@@ -190,7 +209,6 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                 val restricted = runRestrictedAndroidPatch("uninstall")
                 if (restricted.success) {
                     Log.d(TAG, "APatch uninstalled through restricted manager channel")
-                    sharedPreferences.edit { remove(AUTO_PRODUCT_SCHEMA_KEY) }
                     _apStateLiveData.postValue(State.ANDROIDPATCH_NOT_INSTALLED)
                     return true
                 }
@@ -245,9 +263,6 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                 val restricted = runRestrictedAndroidPatch("install")
                 if (restricted.success) {
                     Log.d(TAG, "APatch installed through restricted manager channel")
-                    sharedPreferences.edit {
-                        putInt(AUTO_PRODUCT_SCHEMA_KEY, AUTO_PRODUCT_SCHEMA)
-                    }
                     _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
                     return true
                 }
@@ -386,18 +401,13 @@ class APApplication : Application(), Thread.UncaughtExceptionHandler {
                         }
                     }
                     val productBootstrapNeeded =
-                        detectedState != State.ANDROIDPATCH_INSTALLED ||
-                            sharedPreferences.getInt(AUTO_PRODUCT_SCHEMA_KEY, 0) !=
-                            AUTO_PRODUCT_SCHEMA
+                        detectedState != State.ANDROIDPATCH_INSTALLED
                     if (restrictedStatus.success && productBootstrapNeeded &&
                         autoAndroidPatchAttempted.compareAndSet(false, true)) {
                         Log.i(TAG, "Automatically initializing AndroidPatch")
                         val initialization = runRestrictedAndroidPatch("install")
                         if (initialization.success) {
                             detectedState = State.ANDROIDPATCH_INSTALLED
-                            sharedPreferences.edit {
-                                putInt(AUTO_PRODUCT_SCHEMA_KEY, AUTO_PRODUCT_SCHEMA)
-                            }
                             _apStateLiveData.postValue(detectedState)
                             if (File(NEED_REBOOT_FILE).exists()) {
                                 _kpStateLiveData.postValue(State.KERNELPATCH_NEED_REBOOT)

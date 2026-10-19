@@ -45,17 +45,11 @@ val restrictedTestBackdoor =
     providers.gradleProperty("restricted.testBackdoor").getOrElse("0")
 val restrictedCargoExecutable =
     providers.environmentVariable("KSH_CARGO").getOrElse("cargo")
-val restrictedRuntimeZip = restrictedProfileRoot.map {
-    it.resolve("components/KernelShadowHook/android/managed/build/ksh-managed-runtime.zip")
+val restrictedHookBaseZip = restrictedProfileRoot.map {
+    it.resolve("profile/ksh_hook_base/build/ksh_hook_base.zip")
 }
-val restrictedProductZip = restrictedProfileRoot.map {
-    it.resolve("profile/ksh_module/build/device_profile_ksh.zip")
-}
-val restrictedControllerZip = restrictedProfileRoot.map {
-    it.resolve("profile/ksh_controller/build/ksh_profile_controller.zip")
-}
-val restrictedDeviceProfilesZip = restrictedProfileRoot.map {
-    it.resolve("profile/ksh_device_profiles/build/ksh_device_profiles.zip")
+val restrictedDeviceProfileZip = restrictedProfileRoot.map {
+    it.resolve("profile/device_profile_hook/build/device_profile_hook.zip")
 }
 
 apksign {
@@ -284,6 +278,9 @@ tasks.register<Copy>("stageRestrictedKernelPatchArtifact") {
             file("${project.projectDir}/src/main/assets/ksh_core.kpm"),
             file("${project.projectDir}/src/main/assets/device_profile.kpm"),
         )
+        fileTree("${project.projectDir}/src/main/assets") {
+            include("*_kernelpatch.ko")
+        }.files.forEach(::delete)
         require(kpimg.get().isFile) {
             "Restricted KernelPatch image is missing: ${kpimg.get()}"
         }
@@ -292,15 +289,12 @@ tasks.register<Copy>("stageRestrictedKernelPatchArtifact") {
 
 tasks.register("validateRestrictedProductArtifacts") {
     inputs.files(
-        restrictedRuntimeZip, restrictedProductZip, restrictedControllerZip,
-        restrictedDeviceProfilesZip,
+        restrictedHookBaseZip, restrictedDeviceProfileZip,
     )
     doLast {
         val artifacts = listOf(
-            Triple(restrictedRuntimeZip.get(), "ksh_managed_runtime", "trust/device-profile.pub"),
-            Triple(restrictedProductZip.get(), "device_profile_ksh", "ksh/module.properties"),
-            Triple(restrictedControllerZip.get(), "ksh_profile_controller", "bin/ksh-profile-service"),
-            Triple(restrictedDeviceProfilesZip.get(), "ksh_device_profiles", "profile.index"),
+            Triple(restrictedHookBaseZip.get(), "ksh_hook_base", "kpm/ksh_core.kpm"),
+            Triple(restrictedDeviceProfileZip.get(), "device_profile_hook", "kpm/device_profile.kpm"),
         )
         artifacts.forEach { (archive, expectedId, requiredEntry) ->
             require(archive.isFile && archive.length() > 0L) {
@@ -378,7 +372,6 @@ tasks.getByName("preBuild").dependsOn(
     "stageRestrictedKernelPatchArtifact",
     "downloadKptools",
     "downloadCompatKpatch",
-    "downloadJailbreakKo",
     "mergeScripts",
 )
 

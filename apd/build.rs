@@ -7,7 +7,10 @@ use std::process::Command;
 fn get_git_version() -> Result<(u32, String), std::io::Error> {
     if let Ok(override_code) = env::var("APATCH_VERSION_CODE_OVERRIDE") {
         let version_code: u32 = override_code.trim().parse().map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::Other, "Failed to parse version override")
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to parse version override",
+            )
         })?;
         let version_name = String::from_utf8(
             Command::new("git")
@@ -21,7 +24,10 @@ fn get_git_version() -> Result<(u32, String), std::io::Error> {
                 "Failed to read git describe stdout",
             )
         })?;
-        return Ok((version_code, version_name.trim_start_matches('v').to_string()));
+        return Ok((
+            version_code,
+            version_name.trim_start_matches('v').to_string(),
+        ));
     }
 
     let output = Command::new("git")

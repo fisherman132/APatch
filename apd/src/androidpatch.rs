@@ -20,22 +20,34 @@ const LEGACY_SU_PATH: &str = "/system/bin/su";
 const LEGACY_KPATCH_PATH: &str = "/data/adb/kpatch";
 const PRODUCT_STAGING_ROOT: &str = "/data/adb/ap/.androidpatch-product";
 const PRODUCT_BACKUP_ROOT: &str = "/data/adb/ap/.androidpatch-product-backup";
+const PROFILE_DATA_STAGING_ROOT: &str = "/data/adb/ap/.androidpatch-profile-data";
+const PROFILE_DATA_BACKUP_ROOT: &str = "/data/adb/ap/.androidpatch-profile-data-backup";
+const PROFILE_MODULE_STAGING_ROOT: &str = "/data/adb/ap/.androidpatch-profile-module";
+const PROFILE_MODULE_BACKUP_ROOT: &str = "/data/adb/ap/.androidpatch-profile-module-backup";
 const PROFILE_STATE_ROOT: &str = "/data/adb/ksh-profile-controller";
 const NEED_REBOOT_PATH: &str = "/dev/.need_reboot";
-const PROFILE_SERVICE: &str = "/data/adb/modules/ksh_profile_controller/bin/ksh-profile-service";
+const PROFILE_SERVICE: &str = "/data/adb/modules/device_profile_hook/bin/ksh-profile-service";
+const PROFILE_MODULE_SERVICE: &str = "/data/adb/modules/device_profile_hook/service.sh";
+const HOOK_BASE_SERVICE: &str = "/data/adb/modules/ksh_hook_base/service.sh";
+const HOOK_BASE_STATUS: &str = "/data/adb/ksh-hook-base/status";
+const DEVICE_PROFILE_STATUS: &str = "/data/adb/device-profile-hook/status";
+const BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 const PROFILE_SERVICE_PID: &str = "/data/adb/ksh-profile-controller/service.pid";
+const LEGACY_PROFILE_SERVICE: &str =
+    "/data/adb/modules/ksh_profile_controller/bin/ksh-profile-service";
 const LEGACY_CONTROLLER_BROKER: &str =
     "/data/adb/modules/ksh_profile_controller/bin/ksh-instance-broker";
 
-const KSH_RUNTIME_ZIP: &[u8] = include_bytes!(
-    "../../../../components/KernelShadowHook/android/managed/build/ksh-managed-runtime.zip"
-);
-const KSH_PROFILE_ZIP: &[u8] =
-    include_bytes!("../../../../profile/ksh_module/build/device_profile_ksh.zip");
-const KSH_CONTROLLER_ZIP: &[u8] =
-    include_bytes!("../../../../profile/ksh_controller/build/ksh_profile_controller.zip");
-const KSH_DEVICE_PROFILES_ZIP: &[u8] =
-    include_bytes!("../../../../profile/ksh_device_profiles/build/ksh_device_profiles.zip");
+const KSH_HOOK_BASE_ZIP: &[u8] =
+    include_bytes!("../../../../profile/ksh_hook_base/build/ksh_hook_base.zip");
+const DEVICE_PROFILE_HOOK_ZIP: &[u8] =
+    include_bytes!("../../../../profile/device_profile_hook/build/device_profile_hook.zip");
+const RETIRED_PRODUCT_MODULES: &[&str] = &[
+    "ksh_managed_runtime",
+    "device_profile_ksh",
+    "ksh_device_profiles",
+    "ksh_profile_controller",
+];
 
 struct ProductModule {
     id: &'static str,
@@ -48,50 +60,59 @@ struct ProductModule {
 
 const PRODUCT_MODULES: &[ProductModule] = &[
     ProductModule {
-        id: "ksh_managed_runtime",
-        archive_name: "ksh-managed-runtime.zip",
-        archive: KSH_RUNTIME_ZIP,
+        id: "ksh_hook_base",
+        archive_name: "ksh_hook_base.zip",
+        archive: KSH_HOOK_BASE_ZIP,
         required_paths: &[
             "module.prop",
+            "kpm/ksh_core.kpm",
+            "kpm/ksh_core.sha256",
+            "kpm/authorization.token",
             "zygisk/arm64-v8a.so",
+            "lib64/libzygisk.so",
+            "lib/libzygisk.so",
             "resident/arm64.so",
             "trust/device-profile.pub",
             "trust/policy.properties",
-            "bin/ksh_native_provider_manager",
+            "post-fs-data.sh",
+            "bin/ksh-hook-bootstrap",
+            "bin/ksh-managed-service.sh",
+            "bin/zygiskd64",
+            "bin/zygiskd32",
+            "bin/zygisk-ptrace64",
+            "bin/zygisk-ptrace32",
         ],
         executable_paths: &[
+            "post-fs-data.sh",
             "service.sh",
             "bin/ksh_module_push",
-            "bin/ksh_native_provider_manager",
+            "bin/ksh-hook-bootstrap",
+            "bin/ksh-managed-service.sh",
+            "bin/zygiskd64",
+            "bin/zygiskd32",
+            "bin/zygisk-ptrace64",
+            "bin/zygisk-ptrace32",
         ],
-        private_paths: &[],
+        private_paths: &[
+            "kpm/ksh_core.kpm",
+            "kpm/ksh_core.sha256",
+            "kpm/authorization.token",
+        ],
     },
     ProductModule {
-        id: "device_profile_ksh",
-        archive_name: "device-profile-ksh.zip",
-        archive: KSH_PROFILE_ZIP,
-        required_paths: &["module.prop", "ksh/classes.dex", "ksh/module.properties"],
-        executable_paths: &[],
-        private_paths: &[],
-    },
-    ProductModule {
-        id: "ksh_device_profiles",
-        archive_name: "ksh-device-profiles.zip",
-        archive: KSH_DEVICE_PROFILES_ZIP,
+        id: "device_profile_hook",
+        archive_name: "device_profile_hook.zip",
+        archive: DEVICE_PROFILE_HOOK_ZIP,
         required_paths: &[
             "module.prop",
+            "ksh/classes.dex",
+            "ksh/module.properties",
+            "kpm/device_profile.kpm",
+            "kpm/device_profile.sha256",
+            "kpm/authorization.token",
             "profile.index",
             "bin/ksh-device-profile-data",
-        ],
-        executable_paths: &["service.sh", "bin/ksh-device-profile-data"],
-        private_paths: &[],
-    },
-    ProductModule {
-        id: "ksh_profile_controller",
-        archive_name: "ksh-profile-controller.zip",
-        archive: KSH_CONTROLLER_ZIP,
-        required_paths: &[
-            "module.prop",
+            "bin/ksh-kpm-bootstrap",
             "policy/device-profile.pub",
             "policy/profile_source.sha256",
             "policy/surface_admission.conf",
@@ -104,9 +125,20 @@ const PRODUCT_MODULES: &[ProductModule] = &[
             "uninstall.sh",
             "bin/ksh-profilectl",
             "bin/ksh-profile-service",
+            "bin/ksh-profile-controller-service.sh",
+            "bin/ksh-profile-controller-uninstall.sh",
+            "bin/ksh-kpm-bootstrap",
+            "bin/ksh-device-profile-data",
             "lib/kernel_profile.sh",
         ],
-        private_paths: &["bin/ksh-slot-worker", "bin/ksh-slot-worker-lib.sh"],
+        private_paths: &[
+            "bin/ksh-slot-worker",
+            "bin/ksh-slot-worker-lib.sh",
+            "bin/ksh-network-cert-worker",
+            "kpm/device_profile.kpm",
+            "kpm/device_profile.sha256",
+            "kpm/authorization.token",
+        ],
     },
 ];
 
@@ -437,7 +469,7 @@ fn copy_root_owned_tree(source: &Path, destination: &Path, budget: &mut usize) -
 }
 
 fn preserve_profile_state(staging_root: &Path) -> Result<()> {
-    let source = Path::new(defs::MODULE_DIR).join("device_profile_ksh/ksh/state");
+    let source = Path::new(defs::MODULE_DIR).join("device_profile_hook/ksh/state");
     let metadata = match fs::symlink_metadata(&source) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -450,7 +482,7 @@ fn preserve_profile_state(staging_root: &Path) -> Result<()> {
             && metadata.gid() == 0,
         "Unsafe existing device-profile state"
     );
-    let destination = staging_root.join("device_profile_ksh/ksh/state");
+    let destination = staging_root.join("device_profile_hook/ksh/state");
     remove_path_no_follow(&destination)?;
     let mut entry_budget = 4096;
     copy_root_owned_tree(&source, &destination, &mut entry_budget)
@@ -481,8 +513,11 @@ fn protect_profile_state(path: &Path, budget: &mut usize) -> Result<()> {
 }
 
 fn stop_profile_service() {
-    if Path::new(PROFILE_SERVICE).is_file() {
-        let _ = Command::new(PROFILE_SERVICE)
+    for service in [PROFILE_SERVICE, LEGACY_PROFILE_SERVICE] {
+        if !Path::new(service).is_file() {
+            continue;
+        }
+        let _ = Command::new(service)
             .arg("--stop")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -518,13 +553,66 @@ fn profile_service_running() -> bool {
         .unwrap_or(false)
 }
 
+fn receipt_has_exact_lines(path: &str, required: &[&str]) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.is_file() && !metadata.file_type().is_symlink() && metadata.uid() == 0,
+        "Unsafe product service receipt {path}"
+    );
+    let receipt = fs::read_to_string(path)?;
+    Ok(required
+        .iter()
+        .all(|expected| receipt.lines().any(|line| line == *expected)))
+}
+
+fn verify_product_service_receipts() -> Result<()> {
+    let boot_id = fs::read_to_string(BOOT_ID_PATH)?;
+    let boot_line = format!("boot_id={}", boot_id.trim());
+    ensure!(
+        receipt_has_exact_lines(
+            HOOK_BASE_STATUS,
+            &[
+                "schema=ksh-hook-base-status/v1",
+                &boot_line,
+                "state=ready",
+                "runtime=active",
+                "route_mask=63",
+                "zygote_loader=ready",
+                "managed_runtime=ready",
+            ],
+        )?,
+        "KSH Hook base did not publish a complete current-boot receipt"
+    );
+    ensure!(
+        receipt_has_exact_lines(
+            DEVICE_PROFILE_STATUS,
+            &[
+                "schema=ksh-device-profile-status/v1",
+                &boot_line,
+                "state=ready",
+                "hook_base=ready",
+                "controller=reconciled",
+            ],
+        )?,
+        "device-profile Hook did not publish a complete current-boot receipt"
+    );
+    Ok(())
+}
+
 fn start_product_services() -> Result<()> {
     fs::create_dir_all(PROFILE_STATE_ROOT)?;
     fs::set_permissions(PROFILE_STATE_ROOT, Permissions::from_mode(0o700))?;
     restorecon::lsetfilecon(PROFILE_STATE_ROOT, restorecon::ADB_CON)?;
 
-    let runtime_service = Path::new(defs::MODULE_DIR).join("ksh_managed_runtime/service.sh");
-    ensure!(runtime_service.is_file(), "KSH runtime service is missing");
+    let runtime_service = Path::new(HOOK_BASE_SERVICE);
+    ensure!(
+        runtime_service.is_file(),
+        "KSH Hook base service is missing"
+    );
     Command::new("/system/bin/sh")
         .arg(&runtime_service)
         .stdin(Stdio::null())
@@ -533,29 +621,36 @@ fn start_product_services() -> Result<()> {
         .spawn()
         .context("Cannot start KSH runtime service")?;
 
-    if !profile_service_running() {
-        ensure!(
-            Path::new(PROFILE_SERVICE).is_file(),
-            "KSH profile service is missing"
-        );
-        let status = Command::new(PROFILE_SERVICE)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .context("Cannot start KSH profile service")?;
-        ensure!(status.success(), "KSH profile service start failed");
-        for _ in 0..100 {
-            if profile_service_running() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
+    /*
+     * The mailbox daemon can outlive a failed one-shot module service.  Its
+     * presence therefore does not prove that the current-boot reconciliation
+     * receipt was published.  Always rerun the idempotent module service; its
+     * own lock suppresses duplicate reconcilers while allowing recovery from
+     * a stale blocked receipt.
+     */
+    ensure!(
+        Path::new(PROFILE_MODULE_SERVICE).is_file(),
+        "device-profile module service is missing"
+    );
+    let status = Command::new("/system/bin/sh")
+        .arg(PROFILE_MODULE_SERVICE)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("Cannot start device-profile module service")?;
+    ensure!(status.success(), "device-profile module service failed");
+    for _ in 0..100 {
+        if profile_service_running() {
+            break;
         }
+        thread::sleep(Duration::from_millis(100));
     }
     ensure!(
         profile_service_running(),
-        "KSH profile service did not start"
+        "device-profile service did not start"
     );
+    verify_product_service_receipts()?;
     Ok(())
 }
 
@@ -597,6 +692,9 @@ fn recover_interrupted_product_transaction() -> Result<()> {
 fn install_product_modules() -> Result<()> {
     recover_interrupted_product_transaction()?;
     if product_modules_match()? {
+        if Path::new(NEED_REBOOT_PATH).exists() {
+            return Ok(());
+        }
         return start_product_services();
     }
 
@@ -629,7 +727,7 @@ fn install_product_modules() -> Result<()> {
     preserve_profile_state(staging_root)?;
     let mut state_budget = 4096;
     protect_profile_state(
-        &staging_root.join("device_profile_ksh/ksh/state"),
+        &staging_root.join("device_profile_hook/ksh/state"),
         &mut state_budget,
     )?;
 
@@ -652,6 +750,19 @@ fn install_product_modules() -> Result<()> {
                 fs::write(backup_root.join(format!("{}.absent", product.id)), b"")?;
             }
         }
+        for retired in RETIRED_PRODUCT_MODULES {
+            let current = module_root.join(retired);
+            if fs::symlink_metadata(&current).is_ok() {
+                let metadata = fs::symlink_metadata(&current)?;
+                ensure!(
+                    metadata.is_dir() && !metadata.file_type().is_symlink(),
+                    "Unsafe retired product module {}",
+                    retired
+                );
+                fs::rename(&current, backup_root.join(retired))?;
+                backed_up.push(retired);
+            }
+        }
         for product in PRODUCT_MODULES {
             fs::rename(staging_root.join(product.id), module_root.join(product.id))?;
             installed.push(product.id);
@@ -659,9 +770,11 @@ fn install_product_modules() -> Result<()> {
             let _ = fs::remove_file(module_root.join(product.id).join("remove"));
         }
         verify_product_modules()?;
+        File::create(NEED_REBOOT_PATH)?;
         Ok(())
     })();
     if let Err(error) = transaction {
+        stop_profile_service();
         for id in installed.into_iter().rev() {
             let _ = remove_path_no_follow(&module_root.join(id));
         }
@@ -683,8 +796,210 @@ fn install_product_modules() -> Result<()> {
     }
     remove_path_no_follow(staging_root)?;
     remove_path_no_follow(backup_root)?;
-    File::create(NEED_REBOOT_PATH)?;
-    start_product_services()
+    Ok(())
+}
+
+fn recover_interrupted_profile_data_transaction() -> Result<()> {
+    let backup_root = Path::new(PROFILE_DATA_BACKUP_ROOT);
+    let metadata = match fs::symlink_metadata(backup_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && metadata.uid() == 0
+            && metadata.gid() == 0,
+        "Unsafe AndroidPatch profile-data backup"
+    );
+    let current = Path::new(defs::MODULE_DIR).join("device_profile_hook");
+    for name in ["profiles", "profile.index"] {
+        let backup = backup_root.join(name);
+        if fs::symlink_metadata(&backup).is_ok() {
+            remove_path_no_follow(&current.join(name))?;
+            fs::rename(backup, current.join(name))?;
+        }
+    }
+    remove_path_no_follow(backup_root)
+}
+
+fn verify_installed_profile_data(module_root: &Path) -> Result<()> {
+    let verifier = module_root.join("bin/ksh-device-profile-data");
+    ensure!(
+        verifier.is_file(),
+        "device-profile data verifier is missing"
+    );
+    let status = Command::new(&verifier)
+        .arg("verify-all")
+        .env("KSH_DEVICE_PROFILE_ROOT", module_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("Cannot verify installed device-profile data")?;
+    ensure!(
+        status.success(),
+        "installed device-profile data failed verification"
+    );
+    Ok(())
+}
+
+fn install_profile_data_only() -> Result<()> {
+    recover_interrupted_profile_data_transaction()?;
+    verify_product_service_receipts()?;
+
+    let product = PRODUCT_MODULES
+        .iter()
+        .find(|module| module.id == "device_profile_hook")
+        .context("Built-in device-profile module is missing")?;
+    let current = Path::new(defs::MODULE_DIR).join(product.id);
+    let current_metadata = fs::symlink_metadata(&current)?;
+    ensure!(
+        current_metadata.is_dir()
+            && !current_metadata.file_type().is_symlink()
+            && current_metadata.uid() == 0
+            && current_metadata.gid() == 0,
+        "Unsafe installed device-profile module"
+    );
+
+    let staging_root = Path::new(PROFILE_DATA_STAGING_ROOT);
+    let backup_root = Path::new(PROFILE_DATA_BACKUP_ROOT);
+    remove_path_no_follow(staging_root)?;
+    remove_path_no_follow(backup_root)?;
+    fs::create_dir_all(staging_root)?;
+    fs::create_dir_all(backup_root)?;
+    fs::set_permissions(staging_root, Permissions::from_mode(0o700))?;
+    fs::set_permissions(backup_root, Permissions::from_mode(0o700))?;
+    let staged_module = staging_root.join(product.id);
+    extract_product_module(product, &staged_module)?;
+    verify_product_module_at(product, &staged_module)?;
+
+    stop_profile_service();
+    let transaction = (|| -> Result<()> {
+        for name in ["profiles", "profile.index"] {
+            let installed = current.join(name);
+            let metadata = fs::symlink_metadata(&installed)?;
+            ensure!(
+                !metadata.file_type().is_symlink() && metadata.uid() == 0 && metadata.gid() == 0,
+                "Unsafe installed profile-data object {name}"
+            );
+            fs::rename(&installed, backup_root.join(name))?;
+            fs::rename(staged_module.join(name), &installed)?;
+        }
+        restorecon::restore_syscon(&current.join("profiles"))?;
+        restorecon::restore_syscon(&current.join("profile.index"))?;
+        verify_installed_profile_data(&current)?;
+        start_product_services()?;
+        Ok(())
+    })();
+    if let Err(error) = transaction {
+        stop_profile_service();
+        for name in ["profiles", "profile.index"] {
+            let installed = current.join(name);
+            let backup = backup_root.join(name);
+            let _ = remove_path_no_follow(&installed);
+            if fs::symlink_metadata(&backup).is_ok() {
+                let _ = fs::rename(&backup, &installed);
+            }
+        }
+        let _ = remove_path_no_follow(staging_root);
+        let _ = remove_path_no_follow(backup_root);
+        let _ = start_product_services();
+        return Err(error);
+    }
+    remove_path_no_follow(staging_root)?;
+    remove_path_no_follow(backup_root)?;
+    println!("profile-data=installed");
+    Ok(())
+}
+
+fn recover_interrupted_profile_module_transaction() -> Result<()> {
+    let backup_root = Path::new(PROFILE_MODULE_BACKUP_ROOT);
+    let metadata = match fs::symlink_metadata(backup_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && metadata.uid() == 0
+            && metadata.gid() == 0,
+        "Unsafe AndroidPatch profile-module backup"
+    );
+    let current = Path::new(defs::MODULE_DIR).join("device_profile_hook");
+    let backup = backup_root.join("device_profile_hook");
+    if fs::symlink_metadata(&backup).is_ok() {
+        remove_path_no_follow(&current)?;
+        fs::rename(backup, current)?;
+    }
+    remove_path_no_follow(backup_root)
+}
+
+fn install_profile_module_live_only() -> Result<()> {
+    recover_interrupted_profile_module_transaction()?;
+    verify_product_service_receipts()?;
+    let product = PRODUCT_MODULES
+        .iter()
+        .find(|module| module.id == "device_profile_hook")
+        .context("Built-in device-profile module is missing")?;
+    let current = Path::new(defs::MODULE_DIR).join(product.id);
+    let current_metadata = fs::symlink_metadata(&current)?;
+    ensure!(
+        current_metadata.is_dir()
+            && !current_metadata.file_type().is_symlink()
+            && current_metadata.uid() == 0
+            && current_metadata.gid() == 0,
+        "Unsafe installed device-profile module"
+    );
+
+    let staging_root = Path::new(PROFILE_MODULE_STAGING_ROOT);
+    let backup_root = Path::new(PROFILE_MODULE_BACKUP_ROOT);
+    remove_path_no_follow(staging_root)?;
+    remove_path_no_follow(backup_root)?;
+    fs::create_dir_all(staging_root)?;
+    fs::create_dir_all(backup_root)?;
+    fs::set_permissions(staging_root, Permissions::from_mode(0o700))?;
+    fs::set_permissions(backup_root, Permissions::from_mode(0o700))?;
+    let staged = staging_root.join(product.id);
+    extract_product_module(product, &staged)?;
+    verify_product_module_at(product, &staged)?;
+    preserve_profile_state(staging_root)?;
+    let mut state_budget = 4096;
+    protect_profile_state(&staged.join("ksh/state"), &mut state_budget)?;
+
+    // KPMs are resident for this boot. A live controller/data update must keep
+    // the exact installed KPM bytes, digest and authorization token.
+    remove_path_no_follow(&staged.join("kpm"))?;
+    let mut kpm_budget = 64;
+    copy_root_owned_tree(&current.join("kpm"), &staged.join("kpm"), &mut kpm_budget)?;
+    restorecon::restore_syscon(&staged)?;
+
+    stop_profile_service();
+    fs::rename(&current, backup_root.join(product.id))?;
+    let transaction = (|| -> Result<()> {
+        fs::rename(&staged, &current)?;
+        verify_installed_profile_data(&current)?;
+        start_product_services()?;
+        Ok(())
+    })();
+    if let Err(error) = transaction {
+        stop_profile_service();
+        let _ = remove_path_no_follow(&current);
+        let backup = backup_root.join(product.id);
+        if fs::symlink_metadata(&backup).is_ok() {
+            let _ = fs::rename(&backup, &current);
+        }
+        let _ = remove_path_no_follow(staging_root);
+        let _ = remove_path_no_follow(backup_root);
+        let _ = start_product_services();
+        return Err(error);
+    }
+    remove_path_no_follow(staging_root)?;
+    remove_path_no_follow(backup_root)?;
+    println!("profile-module-live=installed");
+    Ok(())
 }
 
 fn ensure_state_files() -> Result<()> {
@@ -742,7 +1057,6 @@ pub fn install(source_dir: Option<&Path>) -> Result<()> {
 
     label_androidpatch_files()?;
     sepolicy::apply_magisk_policy_live()?;
-    install_product_modules()?;
     write_version()?;
     restorecon::lsetfilecon(VERSION_PATH, restorecon::ADB_CON)?;
 
@@ -751,6 +1065,18 @@ pub fn install(source_dir: Option<&Path>) -> Result<()> {
         defs::VERSION_CODE.trim()
     );
     Ok(())
+}
+
+pub fn install_modules() -> Result<()> {
+    install_product_modules()
+}
+
+pub fn install_profile_data() -> Result<()> {
+    install_profile_data_only()
+}
+
+pub fn install_profile_module_live() -> Result<()> {
+    install_profile_module_live_only()
 }
 
 pub fn uninstall() -> Result<()> {
@@ -770,11 +1096,7 @@ pub fn uninstall() -> Result<()> {
 pub fn status() -> Result<()> {
     let version = fs::read_to_string(VERSION_PATH).unwrap_or_default();
     let version = version.trim();
-    if Path::new(defs::DAEMON_PATH).is_file()
-        && !version.is_empty()
-        && product_modules_match().unwrap_or(false)
-        && profile_service_running()
-    {
+    if Path::new(defs::DAEMON_PATH).is_file() && !version.is_empty() {
         println!("androidpatch=installed version={version}");
     } else {
         println!("androidpatch=not-installed version=0");

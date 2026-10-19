@@ -5,9 +5,7 @@ use std::{env, ffi::CStr, path::PathBuf, process::Command};
 use anyhow::{Ok, Result};
 #[cfg(unix)]
 use getopts::Options;
-use rustix::thread::{
-    Gid, Uid, set_thread_groups, set_thread_res_gid, set_thread_res_uid,
-};
+use rustix::thread::{Gid, Uid, set_thread_groups, set_thread_res_gid, set_thread_res_uid};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::pty::prepare_pty;
