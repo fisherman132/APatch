@@ -1,13 +1,16 @@
 use std::{
     fs::File,
-    io::{self, BufRead},
+    io::{self, BufRead, Write},
     path::Path,
     thread,
     time::Duration,
 };
-
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+
+const PACKAGE_CONFIG_PATH: &str = "/data/adb/ap/package_config";
+const PACKAGE_CONFIG_HEADER: [&str; 6] =
+    ["pkg", "exclude", "allow", "uid", "to_uid", "sctx"];
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct PackageConfig {
@@ -22,7 +25,7 @@ pub struct PackageConfig {
 pub fn read_ap_package_config() -> Vec<PackageConfig> {
     let max_retry = 5;
     for _ in 0..max_retry {
-        let file = match File::open("/data/adb/ap/package_config") {
+        let file = match File::open(PACKAGE_CONFIG_PATH) {
             Ok(file) => file,
             Err(e) => {
                 warn!("Error opening file: {}", e);
@@ -54,6 +57,25 @@ pub fn read_ap_package_config() -> Vec<PackageConfig> {
     Vec::new()
 }
 
+fn write_package_config_stream<W: Write>(
+    output: W,
+    package_configs: &[PackageConfig],
+) -> io::Result<()> {
+    let mut writer = csv::Writer::from_writer(output);
+    if package_configs.is_empty() {
+        writer.write_record(PACKAGE_CONFIG_HEADER).map_err(|error| {
+            io::Error::new(io::ErrorKind::Other, error)
+        })?;
+    } else {
+        for config in package_configs {
+            writer.serialize(config).map_err(|error| {
+                io::Error::new(io::ErrorKind::Other, error)
+            })?;
+        }
+    }
+    writer.flush()
+}
+
 pub fn write_ap_package_config(package_configs: &[PackageConfig]) -> io::Result<()> {
     let max_retry = 5;
     for _ in 0..max_retry {
@@ -67,29 +89,13 @@ pub fn write_ap_package_config(package_configs: &[PackageConfig]) -> io::Result<
             }
         };
 
-        let mut writer = csv::Writer::from_writer(file);
-        let mut success = true;
-
-        for config in package_configs {
-            if let Err(e) = writer.serialize(config) {
-                warn!("Error serializing record: {}", e);
-                success = false;
-                break;
-            }
-        }
-
-        if !success {
-            thread::sleep(Duration::from_secs(1));
-            continue;
-        }
-
-        if let Err(e) = writer.flush() {
+        if let Err(e) = write_package_config_stream(file, package_configs) {
             warn!("Error flushing writer: {}", e);
             thread::sleep(Duration::from_secs(1));
             continue;
         }
 
-        if let Err(e) = std::fs::rename(temp_path, "/data/adb/ap/package_config") {
+        if let Err(e) = std::fs::rename(temp_path, PACKAGE_CONFIG_PATH) {
             warn!("Error renaming temp file: {}", e);
             thread::sleep(Duration::from_secs(1));
             continue;
@@ -117,6 +123,10 @@ pub fn synchronize_package_uid() -> io::Result<()> {
         match read_lines("/data/system/packages.list") {
             Ok(lines) => {
                 let lines: Vec<_> = lines.filter_map(|line| line.ok()).collect();
+
+                let header_missing = std::fs::metadata(PACKAGE_CONFIG_PATH)
+                    .map(|metadata| metadata.len() == 0)
+                    .unwrap_or(true);
 
                 let mut package_configs = read_ap_package_config();
 
@@ -164,7 +174,7 @@ pub fn synchronize_package_uid() -> io::Result<()> {
                     }
                 }
 
-                if updated || removed_count > 0 {
+                if header_missing || updated || removed_count > 0 {
                     write_ap_package_config(&package_configs)?;
                 }
                 return Ok(());
@@ -179,4 +189,36 @@ pub fn synchronize_package_uid() -> io::Result<()> {
         io::ErrorKind::Other,
         "Failed after max retries",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_package_config_keeps_a_parseable_csv_header() {
+        let mut output = Vec::new();
+        write_package_config_stream(&mut output, &[]).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "pkg,exclude,allow,uid,to_uid,sctx\n"
+        );
+    }
+
+    #[test]
+    fn populated_package_config_keeps_the_existing_schema() {
+        let config = PackageConfig {
+            pkg: "com.example.app".to_string(),
+            exclude: 0,
+            allow: 1,
+            uid: 10123,
+            to_uid: 0,
+            sctx: "u:r:untrusted_app:s0".to_string(),
+        };
+        let mut output = Vec::new();
+        write_package_config_stream(&mut output, &[config]).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("pkg,exclude,allow,uid,to_uid,sctx\n"));
+        assert!(text.contains("com.example.app,0,1,10123,0,u:r:untrusted_app:s0\n"));
+    }
 }
